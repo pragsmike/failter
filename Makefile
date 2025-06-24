@@ -1,6 +1,6 @@
 .PHONY: test
 run:
-	clojure -M:run
+	clj -M:run /tmp/a.md /tmp/b.md && cat /tmp/b.md
 
 test:
 	clj -X:test

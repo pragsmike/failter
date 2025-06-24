@@ -1,0 +1,9 @@
+.env
+*-
+*.bak
+*.swp
+.nrepl*
+.cache*
+.cpcache
+.clj-kondo
+.lsp

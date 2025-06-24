@@ -7,7 +7,7 @@ test:
 
 
 pack:
-	(for i in README.md config.edn deps.edn Makefile ;\
+	(for i in README.md deps.edn Makefile ;\
 	   do echo $$i; cat $$i; echo ---- ; done ;\
 	echo Source files; echo -----; \
 	cat src/failter/*.clj ) >~/failter-pack.txt

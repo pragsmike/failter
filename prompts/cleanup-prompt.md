@@ -55,4 +55,4 @@ Provide only the cleaned markdown text. Do not explain what you removed or provi
 
 **INPUT TEXT TO CLEAN:**
 
-[Paste the markdown text here]
+{{INPUT_TEXT}}

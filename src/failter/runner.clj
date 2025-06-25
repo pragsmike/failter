@@ -12,7 +12,8 @@
   - :input-path (String) - Path to the input text file.
   - :output-path (String) - Path to write the final output.
   - :timeout (Long, optional) - Timeout in milliseconds for the LLM call."
-  [{:keys [model-name template-path input-path output-path timeout]}]
+  [{:keys [model-name template-path input-path output-path timeout]
+    :or {timeout 600000}}] ; Set a default timeout for all trials
   (try
     (println "--- Running Trial ---")
     (println (str "  Model: " model-name))
@@ -25,9 +26,7 @@
                                     "{{INPUT_TEXT}}"
                                     input-content)
           _ (println (str "  Sending request to LLM (" model-name ")..."))
-          llm-response (if timeout
-                         (llm/call-model model-name final-prompt :timeout timeout)
-                         (llm/call-model model-name final-prompt))]
+          llm-response (llm/call-model model-name final-prompt :timeout timeout)]
 
       (if (str/starts-with? llm-response "{\"error\":")
         (do
@@ -39,9 +38,17 @@
           (io/make-parents output-path)
           (println (str "  Writing LLM response to: " output-path))
           (spit output-path llm-response)
-          (println "--- Trial Complete ---"))))
+          (println "--- Trial Complete ---\n"))))
 
     (catch java.io.FileNotFoundException e
       (println (str "ERROR: File not found during trial - " (.getMessage e))))
     (catch Exception e
       (println (str "ERROR: An unexpected error occurred during trial: " (.getMessage e))))))
+
+;; --- Bridge function for the experiment orchestrator ---
+
+(defn live-trial-runner
+  "A wrapper function that matches the signature for conduct-experiment
+  and calls the main trial execution logic."
+  [params]
+  (run-single-trial params))

@@ -67,7 +67,7 @@
               template-path templates
               model-name    models
               :let [sanitized-model    (sanitize-name model-name)
-                    sanitized-template (sanitize-name (.getName template-path))
+                    sanitized-template (sanitize-name (.getName (io/file template-path)))
                     output-dir-name    (str sanitized-model "_" sanitized-template)
                     output-dir         (io/file experiment-dir output-dir-name)
                     input-filename     (.getName (io/file input-path))

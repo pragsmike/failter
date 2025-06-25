@@ -36,7 +36,7 @@
   [model-name prompt-string & {:keys [timeout] :or {timeout DEFAULT_TIMEOUT_MS}}]
   (println (str "\n;; --- ACTUALLY Calling LLM: " model-name " via " LITELLM_ENDPOINT " ---"))
   (println (str ";; --- Using timeout: " timeout "ms ---"))
-  (println (str "\nPrompt: \n" prompt-string))
+  #_(println (str "\nPrompt: \n" prompt-string))
   (try
     (let [request-body {:model model-name
                         :messages [{:role "user" :content prompt-string}]}

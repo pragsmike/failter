@@ -11,7 +11,7 @@
   [s]
   (-> s
       (str/replace #"\.md$" "")
-      (str/replace #"[/:.]+" "_")))
+      (str/replace #"[/:.]+" "-")))
 
 (defn- list-file-paths
   "Returns a lazy sequence of absolute paths for files in a directory."

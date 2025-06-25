@@ -32,7 +32,9 @@
                                         "{{INPUT_TEXT}}"
                                         input-content)
               _ (println (str "Sending request to LLM (" model-name ")..."))
-              llm-response (llm/call-model model-name final-prompt)]
+              llm-response (llm/call-model model-name
+                                           final-prompt
+                                           :timeout 600000)] ;; <--- MODIFIED: 10 minute timeout
 
           ;; The llm-interface returns a JSON string with an :error key on failure.
           (if (str/starts-with? llm-response "{\"error\":")

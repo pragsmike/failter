@@ -1,0 +1,55 @@
+Now we have a way to transform a file as specified by a prompt template.
+Let's devise a way to experiment with different models and prompt template.
+First step is to isolate the code now in core that constructs the prompt
+and calls the model, into a function that accepts a model name and a prompt template name,
+as well as input and output filenames.
+
+Next we'll devise a way to design an experiment where these parameters are varied over a sequence of trial runs:
+  * the input text
+  * the model name
+  * the prompt template
+
+We want to support multiple experiements, each with different sets of those parameters.
+To do this, each experiment will be define in a directory that holds the sets
+of parameters, and where the results are collected as described below.
+
+Each experiment's directory contains subdirectories and files as follows.
+
+A directory "templates" that contains the set of prompt template files.
+A directory "inputs" that contains the set of input text files.
+A file model-names.txt that contains the set of model names, one per line.
+Each trial will create an output directory under the experiment directory as described below.
+
+For each input text, we'll try all combinations of model and prompt template.
+
+The choice of parameters for each trial will be implied by the name and location of the output file.
+The output file name will be the same as the input file, and placed in a directory whose name
+is built from the model name and prompt template.  For example, a certain trial would transform the file
+inputs/one.md using qwen3:32b and prompt1.md into the new file qwen3-32b_prompt1/one.md .
+
+We won't be doing this right away, but know this:
+After that is working, and we have collected the results of some trials,
+we will use an LLM to evaluate the results of each trial.
+The input to the evaluation is the input text, the prompt, and the output text.
+The evaluator will decide how well the output matches what the prompt implies it should look like.
+The evaluator will be a "smart" one, perhaps a reasoning model.
+For each output file, the evaluator will place a new file along side it with the same name
+but with a suffix "eval".  The eval file will have a grade (A,B,C,D,F) and an explanation
+of how well the output matched what the prompt implied it shoudl be.
+
+Structure the code so that it's possible to test the experiment design without
+running the trials.  Have a function conduct-experiment function that takes an experiment directory name
+and a run-trial function. The experiment directory contains the input files, templates, and model list
+as described above.
+conduct-experiment calls the run-trial function with each combination of the parameters called
+for by the experiment, and the output file directory+name for that trial.
+
+We can test conduct-experiment by constructing an experiment directory with the proper contents,
+and calling conduct-experiment with that directory and a function that will simply print the
+parameters it is given.
+
+In a live experiment, the run-trial function will read in the proper files, set up the prompt,
+and call the core function that actually calls the model.
+
+Don't generate any code yet.  Summarize what you think this plan is, and tell me what you think
+is not well-specified or inconsistent, and how it could be improved.

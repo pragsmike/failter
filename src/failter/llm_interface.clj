@@ -4,6 +4,7 @@
 
 (def LITELLM_ENDPOINT "http://localhost:8000/chat/completions") ; Default LiteLLM endpoint
 (def LITELLM_API_KEY (System/getenv "LITELLM_API_KEY"))
+(def DEFAULT_TIMEOUT_MS 300000) ; Default timeout of 5 minutes
 
 (defn pre-flight-checks []
   (when-not (seq LITELLM_API_KEY)
@@ -30,9 +31,11 @@
       (json/write-str {:error (str "Malformed JSON from LLM: " (.getMessage e))}))))
 
 (defn call-model
-  "Makes an actual HTTP call to the LiteLLM endpoint."
-  [model-name prompt-string]
+  "Makes an actual HTTP call to the LiteLLM endpoint.
+  Accepts an optional :timeout key in milliseconds."
+  [model-name prompt-string & {:keys [timeout] :or {timeout DEFAULT_TIMEOUT_MS}}]
   (println (str "\n;; --- ACTUALLY Calling LLM: " model-name " via " LITELLM_ENDPOINT " ---"))
+  (println (str ";; --- Using timeout: " timeout "ms ---"))
   (println (str "\nPrompt: \n" prompt-string))
   (try
     (let [request-body {:model model-name
@@ -46,8 +49,9 @@
                                :accept :json
                                :headers headers
                                :throw-exceptions false
-                               :socket-timeout 300000
-                               :connection-timeout 300000})]
+                               :socket-timeout timeout      ;; <--- MODIFIED
+                               :connection-timeout timeout  ;; <--- MODIFIED
+                               })]
       (if (= 200 (:status response))
         (parse-llm-response (:body response) model-name)
         (do

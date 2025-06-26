@@ -3,8 +3,11 @@
             [clojure.java.io :as io]
             [clojure.pprint :as pprint]))
 
-(defn- sanitize-name [s]
-  (-> s (str/replace #"\.md$" "") (str/replace #"[/:.]+" "-")))
+(defn- sanitize-name
+  "Replaces filesystem-unfriendly characters in a string with hyphens."
+  [s]
+  ;; --- THIS IS THE MODIFIED REGEX ---
+  (-> s (str/replace #"\.md$" "") (str/replace #"[/:.\s]+" "-")))
 
 (defn- list-file-paths [dir]
   (->> (io/file dir) .listFiles (filter #(.isFile %)) (map #(.getPath %))))
@@ -36,7 +39,6 @@
               :let [sanitized-model    (sanitize-name model-name)
                     sanitized-template (sanitize-name (.getName (io/file template-path)))
                     output-dir-name    (str sanitized-model "_" sanitized-template)
-                    ;; --- THIS IS THE MODIFIED LINE ---
                     output-dir         (io/file experiment-dir "results" output-dir-name)
                     input-filename     (.getName (io/file input-path))
                     output-file        (io/file output-dir input-filename)]]

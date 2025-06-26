@@ -4,7 +4,7 @@
             [failter.frontmatter :as fm]
             [failter.llm-interface :as llm]))
 
-(def JUDGE_MODEL "gpt-4o")
+(def JUDGE_MODEL "gpt-4o") ; Default model name, now without the provider
 (def EVALUATION_PROMPT_PATH "prompts/evaluation-prompt.md")
 
 (defn- evaluate-one-file
@@ -16,13 +16,16 @@
           original-input-body  (:body (fm/parse-file-content (slurp input-path)))
           prompt-template      (slurp template-path)
           generated-output-body(:body (fm/parse-file-content (slurp output-path)))
+
           final-prompt (-> eval-prompt-template
                            (str/replace "{{ORIGINAL_INPUT}}" original-input-body)
                            (str/replace "{{PROMPT_TEMPLATE}}" prompt-template)
                            (str/replace "{{GENERATED_OUTPUT}}" generated-output-body))
+
           _ (println (str "  Judge Model: " judge-model "  Output File: " output-path))
           eval-response (llm/call-model judge-model final-prompt :timeout 600000)
           eval-file-path (str output-path ".eval")]
+
       (if (:error eval-response)
         (println (str "ERROR: Judge LLM failed for " output-path "\n" (:error eval-response)))
         (do
@@ -34,8 +37,12 @@
 (defn run-evaluation
   "Scans an experiment directory for outputs and runs the evaluation process on them."
   [experiment-dir & {:keys [judge-model] :or {judge-model JUDGE_MODEL}}]
-  (println (str "Starting evaluation for experiment in: " experiment-dir))
-  (let [results-root (io/file experiment-dir "results")
+  (let [;; --- THIS IS THE NEW LOGIC ---
+        normalized-judge-model (if (str/includes? judge-model "/")
+                                 judge-model
+                                 (str "openai/" judge-model))
+        _ (println (str "Starting evaluation for experiment in: " experiment-dir " using judge: " normalized-judge-model))
+        results-root (io/file experiment-dir "results")
         output-files (when (.exists results-root)
                        (->> results-root
                             (file-seq)
@@ -55,7 +62,7 @@
         :else
         (let [template-path (str (io/file experiment-dir "templates" (:filtered-by-template metadata)))
               input-path    (str (io/file experiment-dir "inputs" (.getName output-file)))]
-          (evaluate-one-file {:judge-model   judge-model
+          (evaluate-one-file {:judge-model   normalized-judge-model
                               :template-path template-path
                               :input-path    input-path
                               :output-path   output-path}))))))

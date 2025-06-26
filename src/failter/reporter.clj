@@ -44,7 +44,19 @@
        :avg-cost (if (and (seq costs) (every? some? costs)) (/ (double (apply + costs)) (count costs)) 0.0)
        :grade-dist (frequencies grades)})))
 
-(defn- format-as-table [summaries]
+(defn- prepare-summary-for-display
+  "Takes a raw summary map and returns a map with values formatted for printing."
+  [{:keys [model template avg-score avg-time-s avg-cost trials errors grade-dist]}]
+  {:model model
+   :template template
+   :avg-score (format "%.2f" avg-score)
+   :avg-time-s (format "%.2f" avg-time-s)
+   :avg-cost (format "$%.6f" avg-cost)
+   :trials (str trials)
+   :errors (str errors)
+   :grade-dist (pr-str (into (sorted-map-by #(compare %2 %1)) grade-dist))})
+
+(defn- format-as-table [display-summaries]
   (let [header (str/join " | "
                          [(format "%-35s" "Model")
                           (format "%-20s" "Template")
@@ -55,32 +67,23 @@
                           (format "%-6s" "Errors")
                           "Grade Distribution"])
         separator (str/join "" (repeat 140 "-"))
-        rows (for [{:keys [model template avg-score avg-time-s avg-cost trials errors grade-dist]} summaries]
+        rows (for [{:keys [model template avg-score avg-time-s avg-cost trials errors grade-dist]} display-summaries]
                (str/join " | "
                          [(format "%-35s" model)
                           (format "%-20s" template)
-                          (format "%-10.2f" avg-score)
-                          (format "%-10.2f" avg-time-s)
-                          (format "$%-9.6f" avg-cost)
-                          (format "%-7d" trials)
-                          (format "%-6d" errors)
-                          (pr-str (into (sorted-map-by #(compare %2 %1)) grade-dist))]))]
+                          (format "%-10s" avg-score)
+                          (format "%-10s" avg-time-s)
+                          (format "%-10s" avg-cost)
+                          (format "%-7s" trials)
+                          (format "%-6s" errors)
+                          grade-dist]))]
     (str/join "\n" (concat [header separator] rows))))
 
-(defn- format-as-csv [summaries]
-  ;; --- THIS IS THE CORRECTED FUNCTION ---
+(defn- format-as-csv [display-summaries]
   (let [header ["Model" "Template" "Avg_Score" "Avg_Time_s" "Avg_Cost" "Trials" "Errors" "Grade_Distribution"]
-        rows (for [{:keys [model template avg-score avg-time-s avg-cost trials errors grade-dist]} summaries]
-               [model
-                template
-                (format "%.2f" avg-score)
-                (format "%.2f" avg-time-s)
-                (format "%.6f" avg-cost)
-                (str trials)
-                (str errors)
-                (pr-str (into (sorted-map-by #(compare %2 %1)) grade-dist))])
+        rows (for [{:keys [model template avg-score avg-time-s avg-cost trials errors grade-dist]} display-summaries]
+               [model template avg-score avg-time-s avg-cost trials errors grade-dist])
         data-to-write (cons header rows)]
-    ;; Call the function directly and return its string result.
     (csv/write-csv data-to-write)))
 
 (defn generate-report [experiment-dir]
@@ -90,8 +93,11 @@
                        (->> results-root
                             (file-seq)
                             (filter #(and (.isFile %) (str/ends-with? (.getName %) ".md")))))
-        parsed-data (remove nil? (map get-trial-result output-files))
-        summaries (->> parsed-data
+        
+        ;; --- REFACTORED PIPELINE ---
+        summaries (->> output-files
+                       (map get-trial-result)
+                       (remove nil?)
                        (group-by (juxt :filtered-by-model :filtered-by-template))
                        (vals)
                        (map calculate-summary)
@@ -99,8 +105,10 @@
                        (sort-by :avg-score)
                        (reverse))
 
-        table-string (format-as-table summaries)
-        csv-string   (format-as-csv summaries)
+        display-summaries (map prepare-summary-for-display summaries)
+
+        table-string (format-as-table display-summaries)
+        csv-string   (format-as-csv display-summaries)
 
         report-md-path  (str (io/file experiment-dir "report.md"))
         report-csv-path (str (io/file experiment-dir "report.csv"))]

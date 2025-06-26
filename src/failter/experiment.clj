@@ -6,8 +6,21 @@
 (defn- sanitize-name
   "Replaces filesystem-unfriendly characters in a string with hyphens."
   [s]
-  ;; --- THIS IS THE MODIFIED REGEX ---
   (-> s (str/replace #"\.md$" "") (str/replace #"[/:.\s]+" "-")))
+
+(defn- build-trial-params
+  "Constructs the full parameter map for a single trial run."
+  [experiment-dir model-name template-path input-path]
+  (let [sanitized-model    (sanitize-name model-name)
+        sanitized-template (sanitize-name (.getName (io/file template-path)))
+        output-dir-name    (str sanitized-model "_" sanitized-template)
+        output-dir         (io/file experiment-dir "results" output-dir-name)
+        input-filename     (.getName (io/file input-path))
+        output-file        (io/file output-dir input-filename)]
+    {:model-name    model-name
+     :template-path template-path
+     :input-path    input-path
+     :output-path   (.getPath output-file)}))
 
 (defn- list-file-paths [dir]
   (->> (io/file dir) .listFiles (filter #(.isFile %)) (map #(.getPath %))))
@@ -35,25 +48,17 @@
       (println (str "Total trials to consider: " total-trials "\n"))
       (doseq [input-path    inputs
               template-path templates
-              model-name    models
-              :let [sanitized-model    (sanitize-name model-name)
-                    sanitized-template (sanitize-name (.getName (io/file template-path)))
-                    output-dir-name    (str sanitized-model "_" sanitized-template)
-                    output-dir         (io/file experiment-dir "results" output-dir-name)
-                    input-filename     (.getName (io/file input-path))
-                    output-file        (io/file output-dir input-filename)]]
-        (if (.exists output-file)
-          (println (str "Skipping existing trial: " (.getPath output-file)))
-          (try
-            (let [trial-params {:model-name    model-name
-                                :template-path template-path
-                                :input-path    input-path
-                                :output-path   (.getPath output-file)}]
-              (trial-fn trial-params))
-            (catch Exception e
-              (println (str "\nERROR: Trial failed for input '" input-filename
-                            "' with model '" model-name "'"))
-              (println (str "  -> " (.getMessage e) "\n")))))))
+              model-name    models]
+        (let [trial-params (build-trial-params experiment-dir model-name template-path input-path)
+              output-file  (io/file (:output-path trial-params))]
+          (if (.exists output-file)
+            (println (str "Skipping existing trial: " (:output-path trial-params)))
+            (try
+              (trial-fn trial-params)
+              (catch Exception e
+                (println (str "\nERROR: Trial failed for input '" (.getName (io/file input-path))
+                              "' with model '" model-name "'"))
+                (println (str "  -> " (.getMessage e) "\n"))))))))
     (catch java.io.FileNotFoundException e
       (println (str "ERROR: Could not start experiment. A required file or directory is missing: " (.getMessage e)))
       (System/exit 1))

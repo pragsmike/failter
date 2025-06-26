@@ -116,7 +116,7 @@ Failter's architecture is built on a few key design principles:
 -   **Decoupled Logic:** The code is organized into modular namespaces for orchestration, execution, evaluation, and reporting. This makes the system easy to understand and extend.
 -   **Self-Describing Artifacts:** Each output file's YAML frontmatter contains a complete record of its creation, including the model, template, execution time, token usage, and cost.
 
-See the [docs/DESIGN.md](DESIGN) document for a more detailed architectural overview.
+See the [DESIGN](docs/DESIGN.md) document for a more detailed architectural overview.
 
 ## Contributing
 

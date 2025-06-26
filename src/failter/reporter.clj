@@ -2,7 +2,8 @@
   (:require [clojure.java.io :as io]
             [clj-yaml.core :as yaml]
             [failter.frontmatter :as fm]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [clojure-csv.core :as csv]))
 
 (def grade-scores {"A" 5 "B" 4 "C" 3 "D" 2 "F" 1})
 
@@ -21,29 +22,27 @@
               yaml-str (or (second (re-find yaml-regex eval-content)) eval-content)
               eval-meta (yaml/parse-string yaml-str)]
           (merge output-meta eval-meta))
-
         (:error output-meta)
         (assoc output-meta :grade "F" :rationale (:error output-meta))
-
         :else
         output-meta))
     (catch Exception e nil)))
 
 (defn- calculate-summary [results]
-  (let [first-result (first results)
-        grades (keep :grade results)
-        scores (keep grade-scores grades)
-        times  (keep :execution-time-ms results)
-        costs  (keep :estimated-cost results)
-        errors (filter :error results)]
-    {:model (:filtered-by-model first-result)
-     :template (:filtered-by-template first-result)
-     :trials (count results)
-     :errors (count errors)
-     :avg-score (if (seq scores) (/ (double (apply + scores)) (count scores)) 0.0)
-     :avg-time-s (if (seq times) (/ (double (apply + times)) 1000 (count times)) 0.0)
-     :avg-cost (if (and (seq costs) (every? some? costs)) (/ (double (apply + costs)) (count costs)) 0.0)
-     :grade-dist (frequencies grades)}))
+  (when-let [first-result (first results)]
+    (let [grades (keep :grade results)
+          scores (keep grade-scores grades)
+          times  (keep :execution-time-ms results)
+          costs  (keep :estimated-cost results)
+          errors (filter :error results)]
+      {:model (:filtered-by-model first-result)
+       :template (:filtered-by-template first-result)
+       :trials (count results)
+       :errors (count errors)
+       :avg-score (if (seq scores) (/ (double (apply + scores)) (count scores)) 0.0)
+       :avg-time-s (if (seq times) (/ (double (apply + times)) 1000 (count times)) 0.0)
+       :avg-cost (if (and (seq costs) (every? some? costs)) (/ (double (apply + costs)) (count costs)) 0.0)
+       :grade-dist (frequencies grades)})))
 
 (defn- format-as-table [summaries]
   (let [header (str/join " | "
@@ -69,17 +68,20 @@
     (str/join "\n" (concat [header separator] rows))))
 
 (defn- format-as-csv [summaries]
-  (let [header "Model,Template,Avg_Score,Avg_Time_s,Avg_Cost,Trials,Errors,Grade_Distribution"
+  ;; --- THIS IS THE CORRECTED FUNCTION ---
+  (let [header ["Model" "Template" "Avg_Score" "Avg_Time_s" "Avg_Cost" "Trials" "Errors" "Grade_Distribution"]
         rows (for [{:keys [model template avg-score avg-time-s avg-cost trials errors grade-dist]} summaries]
-               (str/join "," [(str "\"" model "\"")
-                              (str "\"" template "\"")
-                              (format "%.2f" avg-score)
-                              (format "%.2f" avg-time-s)
-                              (format "%.6f" avg-cost)
-                              trials
-                              errors
-                              (str "\"" (pr-str (into (sorted-map-by #(compare %2 %1)) grade-dist)) "\"")]))]
-    (str/join "\n" (cons header rows))))
+               [model
+                template
+                (format "%.2f" avg-score)
+                (format "%.2f" avg-time-s)
+                (format "%.6f" avg-cost)
+                (str trials)
+                (str errors)
+                (pr-str (into (sorted-map-by #(compare %2 %1)) grade-dist))])
+        data-to-write (cons header rows)]
+    ;; Call the function directly and return its string result.
+    (csv/write-csv data-to-write)))
 
 (defn generate-report [experiment-dir]
   (println (str "Generating report for experiment: " experiment-dir))
@@ -93,6 +95,7 @@
                        (group-by (juxt :filtered-by-model :filtered-by-template))
                        (vals)
                        (map calculate-summary)
+                       (remove nil?)
                        (sort-by :avg-score)
                        (reverse))
 

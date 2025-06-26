@@ -1,17 +1,17 @@
-# Failter: LLM-Powered Text Filtering and Experimentation
+# **Failter: LLM-Powered Text Filtering and Experimentation**
 
 Failter is a command-line framework for systematically filtering text using Large Language Models (LLMs). It serves as a powerful experimentation harness to compare the performance of different models and prompt engineering strategies for specific text transformation tasks.
 
 Instead of hard-coding filtering logic, Failter defines transformations in natural language via **prompt templates**. It then automates the process of running these transformations across various models and input files, evaluating the results with a "judge" LLM, and generating comparative reports.
 
-  <!-- Placeholder for a future workflow diagram -->
+See the [USAGE.md](USAGE.md) document on how to use this tool to optimize prompts.
 
 ## Features
 
 -   **Prompt-Driven Logic:** Define complex text transformations in natural language, not code.
 -   **Systematic Experimentation:** Run trials across all combinations of inputs, prompts, and models automatically.
 -   **Automated Evaluation:** Use a powerful "judge" LLM (e.g., GPT-4o) to grade the quality of each trial's output.
--   **Comprehensive Reporting:** Generate summary reports that rank `model-template` combinations by average score, time, and cost.
+-   **Comprehensive Reporting:** Generate summary reports that rank model-prompt combinations by average score, time, and cost, saved as both Markdown and CSV.
 -   **Resilient & Idempotent:** Automatically skips completed work and isolates failures, allowing you to resume long-running experiments.
 -   **Data-Rich Artifacts:** Output files are self-contained with YAML frontmatter detailing how they were created, including performance metrics and any errors.
 -   **Insightful Diagnostics:** Captures the model's "internal monologue" (`<think>...</think>`) into separate `.thoughts` files for deeper analysis.
@@ -22,7 +22,7 @@ The Failter workflow is a three-step pipeline executed from the command line:
 
 1.  **`experiment`**: Kicks off the process. Failter reads your experiment configuration, runs each trial (input + prompt + model), and generates filtered output files in a structured `results/` directory.
 2.  **`evaluate`**: Assesses the quality of the generated outputs. It uses a powerful "judge" LLM to compare the original text with the filtered output based on the prompt's instructions, saving a grade and rationale for each.
-3.  **`report`**: Synthesizes the results. It scans all trial outputs and their evaluations, automatically assigning an 'F' grade to any failed trials, and generates a summary table ranking the performance of each model-prompt combination.
+3.  **`report`**: Synthesizes the results. It scans all trial outputs and their evaluations, automatically assigning an 'F' grade to any failed trials, and generates a summary report as both `report.md` and `report.csv`.
 
 ## Installation & Setup
 
@@ -70,7 +70,7 @@ my-experiment/
 All commands are run from the project root.
 
 **Step 1: Run the Experiment**
-This will generate the filtered files in `my-experiment/results/`.
+This will create a `results/` directory inside `my-experiment/` and populate it with the filtered files.
 
 ```bash
 # Perform a dry run first to verify the setup
@@ -81,32 +81,34 @@ clj -M:run experiment my-experiment
 ```
 
 **Step 2: Evaluate the Results**
-This will create `.eval` files alongside the outputs in the `results/` directory.
+This will create `.eval` files alongside the outputs inside the `results/` directory.
 
 ```bash
 clj -M:run evaluate my-experiment
 ```
-*Optional: Use a specific judge model:*
-```bash
-clj -M:run evaluate my-experiment --judge-model openai/gpt-4o
-```
 
 **Step 3: Generate the Report**
-This will print a summary table of all trial results to your console.
+This will print a summary table to your console and also save `report.md` and `report.csv` inside your experiment directory.
 
 ```bash
 clj -M:run report my-experiment
 ```
 
-**Example Report Output:**
+### 3. Interpreting the Results
+
+After running the full pipeline, your experiment directory will contain the generated `results/` directory and the final reports.
+
+**Example Report Output (`report.md`):**
 ```
-Model_Template_Combination          | Avg Score  | Avg Time(s) | Avg Cost   | Trials  | Errors | Grade Distribution
----------------------------------------------------------------------------------------------------------------------
-openai-gpt-4o-mini_aggressive       | 4.50       | 8.12        | $0.000152  | 2       | 0      | {"A" 1, "B" 1}
-ollama-qwen3-8b_aggressive          | 3.00       | 45.19       | $0.000000  | 2       | 0      | {"C" 2}
-ollama-qwen3-8b_basic               | 2.50       | 42.88       | $0.000000  | 2       | 0      | {"B" 1, "D" 1}
-openai-gpt-4o-mini_basic            | 1.00       | 60.01       | $0.000000  | 2       | 2      | {"F" 2}
+Model                               | Template             | Avg Score  | Avg Time(s) | Avg Cost   | Trials  | Errors | Grade Distribution
+--------------------------------------------------------------------------------------------------------------------------------------------
+openai/gpt-4o-mini                  | cleanup-aggressive.md| 4.50       | 8.12        | $0.000152  | 2       | 0      | {"A" 1, "B" 1}
+ollama/qwen3:8b                     | cleanup-aggressive.md| 4.20       | 35.80       | $0.000000  | 2       | 0      | {"A" 1, "B" 1}
+ollama/qwen3:8b                     | cleanup-basic.md     | 2.50       | 42.88       | $0.000000  | 2       | 0      | {"B" 1, "D" 1}
+openai/gpt-4o-mini                  | cleanup-basic.md     | 1.00       | 60.01       | $0.000000  | 2       | 2      | {"F" 2}
 ```
+
+The `report.csv` file will contain the same data in a spreadsheet-friendly format. You can also inspect individual trial outputs and their corresponding `.eval` and `.thoughts` files in the `results/` subdirectories for detailed, qualitative analysis.
 
 ## How It Works
 
@@ -116,8 +118,5 @@ Failter's architecture is built on a few key design principles:
 -   **Decoupled Logic:** The code is organized into modular namespaces for orchestration, execution, evaluation, and reporting. This makes the system easy to understand and extend.
 -   **Self-Describing Artifacts:** Each output file's YAML frontmatter contains a complete record of its creation, including the model, template, execution time, token usage, and cost.
 
-See the [DESIGN](docs/DESIGN.md) document for a more detailed architectural overview.
-
-## Contributing
-
-Contributions are welcome! Please feel free to open an issue to discuss a new feature or submit a pull request.
+See the [USAGE.md](USAGE.md) document on how to use this tool to optimize prompts.
+See the [DESIGN.md](./docs/DESIGN.md) document for a more detailed architectural overview.

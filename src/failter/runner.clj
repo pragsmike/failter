@@ -1,51 +1,49 @@
 (ns failter.runner
   (:require [failter.llm-interface :as llm]
+            [failter.frontmatter :as fm]
             [clojure.string :as str]
             [clojure.java.io :as io]))
 
 (defn run-single-trial
-  "Executes a single filtering trial.
-  Reads input and template, calls the LLM, and writes the output.
-  Params map keys:
-  - :model-name (String) - The name of the LLM to use.
-  - :template-path (String) - Path to the prompt template file.
-  - :input-path (String) - Path to the input text file.
-  - :output-path (String) - Path to write the final output.
-  - :timeout (Long, optional) - Timeout in milliseconds for the LLM call."
+  "Executes a single filtering trial, now with frontmatter awareness."
   [{:keys [model-name template-path input-path output-path timeout]
-    :or {timeout 600000}}] ; Set a default timeout for all trials
+    :or {timeout 600000}}]
   (try
-    (println "--- Running Trial ---")
+    (println "--- Running Trial (Frontmatter-aware) ---")
     (println (str "  Model: " model-name))
     (println (str "  Template: " template-path))
     (println (str "  Input: " input-path))
 
-    (let [prompt-template (slurp template-path)
+    (let [;; 1. Parse input file into frontmatter and body
           input-content (slurp input-path)
-          final-prompt (str/replace prompt-template
-                                    "{{INPUT_TEXT}}"
-                                    input-content)
-          _ (println (str "  Sending request to LLM (" model-name ")..."))
-          llm-response (llm/call-model model-name final-prompt :timeout timeout)]
+          {:keys [frontmatter body]} (fm/parse-file-content input-content)
 
-      (if (str/starts-with? llm-response "{\"error\":")
+          ;; 2. Prepare and send ONLY the body to the LLM
+          prompt-template (slurp template-path)
+          final-prompt (str/replace prompt-template "{{INPUT_TEXT}}" body)
+          _ (println (str "  Sending request to LLM (" model-name ")..."))
+          filtered-body (llm/call-model model-name final-prompt :timeout timeout)]
+
+      (if (str/starts-with? filtered-body "{\"error\":")
         (do
           (println "--- ERROR FROM LLM INTERFACE ---")
-          (println llm-response)
-          (println "------------------------------------"))
+          (println filtered-body))
         (do
-          (println (str "  Ensuring output directory exists for: " output-path))
-          (io/make-parents output-path)
-          (println (str "  Writing LLM response to: " output-path))
-          (spit output-path llm-response)
-          (println "--- Trial Complete ---\n"))))
+          ;; 3. Amend metadata and re-serialize with filtered body
+          (let [updated-frontmatter (assoc frontmatter
+                                           :filtered-by-model model-name
+                                           :filtered-by-template (.getName (io/file template-path)))
+                final-output-content (fm/serialize updated-frontmatter filtered-body)]
+
+            (io/make-parents output-path)
+            (println (str "  Writing LLM response with updated frontmatter to: " output-path))
+            (spit output-path final-output-content)
+            (println "--- Trial Complete ---\n")))))
 
     (catch java.io.FileNotFoundException e
       (println (str "ERROR: File not found during trial - " (.getMessage e))))
     (catch Exception e
       (println (str "ERROR: An unexpected error occurred during trial: " (.getMessage e))))))
-
-;; --- Bridge function for the experiment orchestrator ---
 
 (defn live-trial-runner
   "A wrapper function that matches the signature for conduct-experiment

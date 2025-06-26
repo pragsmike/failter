@@ -1,0 +1,14 @@
+Let's revise the workflow a bit.
+The text files have metadata encoded as YAML front matter.
+Currently the Clojure code does not know this, but the prompts do,
+and they instruct the filtering models to preserve it.
+
+I'm ok with the code working with the front matter if it exists.
+If a file doesn't have front matter, we'll treat it as an empty metadata map.
+If a file has front matter, we'll stash it and pass only the body to the filtering model.
+We'll add to the metadata new keys filtered-by-model and filter-by-template.
+When we write the filtered text to the output, we'll prefix it with the amended YAML.
+This will ease the job of the filtering model and simplify the prompt.
+
+The evaluator will be given just the body of the final text, and not the YAML.
+What modules are affected by this change?

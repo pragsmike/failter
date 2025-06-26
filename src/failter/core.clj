@@ -1,27 +1,22 @@
 (ns failter.core
   (:require [failter.llm-interface :as llm]
             [failter.runner :as runner]
-            [failter.experiment :as experiment])
-  (:gen-class))
-
-;; These hardcoded settings are now only used for the 'single' subcommand.
-(def MODEL "ollama/qwen3:32b")
-#_(def MODEL "ollama/mistral-nemo:12b")
-(def TEMPLATE "prompts/cleanup-small-model.md")
-#_(def TEMPLATE "prompts/cleanup-prompt.md")
+            [failter.experiment :as experiment]
+            [failter.evaluator :as evaluator]
+            [failter.reporter :as reporter])) ; Added reporter
 
 (defn- print-usage-and-exit []
   (println "Usage: failter <command> [options]")
   (println "")
   (println "Commands:")
-  (println "  single <input-file> <output-file>   Run a single transformation using hardcoded settings in core.clj.")
-  (println "  experiment <dir> [--dry-run]        Run a full experiment from a structured directory.")
-  (println "                                        --dry-run: Print trial details without running them.")
+  (println "  single <input> <output>              Run a single transformation using hardcoded settings.")
+  (println "  experiment <dir> [--dry-run]         Run a full experiment from a structured directory.")
+  (println "  evaluate <dir> [--judge-model name]  Evaluate results in an experiment directory.")
+  (println "  report <dir>                         Generate a summary report from .eval files.")
   (println "")
   (System/exit 1))
 
 (defn -main [& args]
-  ;; Pre-flight checks are always run first.
   (llm/pre-flight-checks)
 
   (let [[command & params] args]
@@ -30,10 +25,9 @@
       (if (not= (count params) 2)
         (print-usage-and-exit)
         (let [[input-file output-file] params]
-          (println "--- FAILTER (Single Run Mode) ---")
           (runner/run-single-trial
-           {:model-name    MODEL
-            :template-path TEMPLATE
+           {:model-name "ollama/qwen3:32b"
+            :template-path "prompts/cleanup-small-model.md"
             :input-path    input-file
             :output-path   output-file})))
 
@@ -42,13 +36,24 @@
         (print-usage-and-exit)
         (let [[experiment-dir dry-run-flag] params
               trial-fn (if (= dry-run-flag "--dry-run")
-                         (do
-                           (println "--- Starting Experiment (Dry Run) ---")
-                           experiment/print-trial-details)
-                         (do
-                           (println "--- Starting Experiment (Live Run) ---")
-                           runner/live-trial-runner))]
+                         experiment/print-trial-details
+                         runner/live-trial-runner)]
+          (println (str "--- Starting Experiment (" (if (= dry-run-flag "--dry-run") "Dry" "Live") " Run) ---"))
           (experiment/conduct-experiment experiment-dir trial-fn)))
 
-      ;; Default case for invalid command
+      "evaluate"
+      (if (empty? params)
+        (print-usage-and-exit)
+        (let [[experiment-dir & [flag model-name]] params]
+          (if (and flag (not= flag "--judge-model"))
+            (print-usage-and-exit)
+            (if model-name
+              (evaluator/run-evaluation experiment-dir :judge-model model-name)
+              (evaluator/run-evaluation experiment-dir)))))
+
+      "report"
+      (if (not= (count params) 1)
+        (print-usage-and-exit)
+        (reporter/generate-report (first params)))
+
       (print-usage-and-exit))))

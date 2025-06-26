@@ -7,7 +7,7 @@
 (def evaluator-config
   {:default-judge-model "openai/gpt-4o"
    :prompts {:standard "prompts/evaluation-prompt.md"
-             :ground-truth "prompts/evaluation-prompt-gt.md"}}) ; Pre-emptively adding this key
+             :ground-truth "prompts/evaluation-prompt-gt.md"}})
 
 (defn- find-all-trial-outputs
   "Finds all primary .md output files within an experiment's results directory."
@@ -52,36 +52,42 @@
         (catch Exception e
           {:valid? false :reason (str "file read error: " (.getMessage e)) :output-path output-path})))))
 
-(defn- evaluate-one-file
-  "Private function to perform the evaluation of a single output file, using a context map."
-  [judge-model {:keys [input-content template-content output-content output-path]}]
+(defn- build-judge-prompt
+  "Constructs the final prompt string for the judge LLM. This is a pure function.
+  Currently supports only the :standard prompt type."
+  [{:keys [input-content template-content output-content]}]
+  (let [prompt-path (get-in evaluator-config [:prompts :standard])
+        eval-prompt-template (slurp prompt-path)]
+    (-> eval-prompt-template
+        (str/replace "{{ORIGINAL_INPUT}}" input-content)
+        (str/replace "{{PROMPT_TEMPLATE}}" template-content)
+        (str/replace "{{GENERATED_OUTPUT}}" output-content))))
+
+(defn- execute-evaluation!
+  "Executes the evaluation for a single context. This function has side-effects."
+  [judge-model context]
   (try
-    (println "--- Evaluating Trial Output ---")
-    (let [;; Read prompt path from the new config map
-          eval-prompt-template (slurp (get-in evaluator-config [:prompts :standard]))
-          final-prompt (-> eval-prompt-template
-                           (str/replace "{{ORIGINAL_INPUT}}" input-content)
-                           (str/replace "{{PROMPT_TEMPLATE}}" template-content)
-                           (str/replace "{{GENERATED_OUTPUT}}" output-content))
-
-          _ (println (str "  Judge Model: " judge-model "  Output File: " output-path))
-          eval-response (llm/call-model judge-model final-prompt :timeout 600000)
+    (let [final-prompt (build-judge-prompt context)
+          output-path (:output-path context)
           eval-file-path (str output-path ".eval")]
+      (println "--- Evaluating Trial Output ---")
+      (println (str "  Judge Model: " judge-model "  Output File: " output-path))
 
-      (if (:error eval-response)
-        (println (str "ERROR: Judge LLM failed for " output-path "\n" (:error eval-response)))
-        (do
-          (spit eval-file-path (:content eval-response))
-          (println (str "  Writing evaluation to: " eval-file-path)))))
+      (let [eval-response (llm/call-model judge-model final-prompt :timeout 600000)]
+        (if (:error eval-response)
+          (println (str "ERROR: Judge LLM failed for " output-path "\n" (:error eval-response)))
+          (do
+            (spit eval-file-path (:content eval-response))
+            (println (str "  Writing evaluation to: " eval-file-path))))))
     (catch Exception e
-      (println (str "ERROR: An unexpected error occurred during evaluation of " output-path ": " (.getMessage e))))))
+      (println (str "ERROR: An unexpected error occurred during evaluation of " (:output-path context) ": " (.getMessage e))))))
 
 (defn- run-evaluations-for-contexts
   "Iterates over a sequence of contexts, evaluating the valid ones."
   [judge-model contexts]
   (doseq [context contexts]
     (if (:valid? context)
-      (evaluate-one-file judge-model context)
+      (execute-evaluation! judge-model context)
       (println (str "Skipping (" (:reason context) "): " (:output-path context))))))
 
 (defn run-evaluation

@@ -4,8 +4,10 @@
             [failter.frontmatter :as fm]
             [failter.llm-interface :as llm]))
 
-(def JUDGE_MODEL "gpt-4o")
-(def EVALUATION_PROMPT_PATH "prompts/evaluation-prompt.md")
+(def evaluator-config
+  {:default-judge-model "openai/gpt-4o"
+   :prompts {:standard "prompts/evaluation-prompt.md"
+             :ground-truth "prompts/evaluation-prompt-gt.md"}}) ; Pre-emptively adding this key
 
 (defn- find-all-trial-outputs
   "Finds all primary .md output files within an experiment's results directory."
@@ -55,7 +57,8 @@
   [judge-model {:keys [input-content template-content output-content output-path]}]
   (try
     (println "--- Evaluating Trial Output ---")
-    (let [eval-prompt-template (slurp EVALUATION_PROMPT_PATH)
+    (let [;; Read prompt path from the new config map
+          eval-prompt-template (slurp (get-in evaluator-config [:prompts :standard]))
           final-prompt (-> eval-prompt-template
                            (str/replace "{{ORIGINAL_INPUT}}" input-content)
                            (str/replace "{{PROMPT_TEMPLATE}}" template-content)
@@ -83,7 +86,7 @@
 
 (defn run-evaluation
   "Scans an experiment directory for outputs and runs the evaluation process on them."
-  [experiment-dir & {:keys [judge-model] :or {judge-model JUDGE_MODEL}}]
+  [experiment-dir & {:keys [judge-model] :or {judge-model (:default-judge-model evaluator-config)}}]
   (let [normalized-judge-model (if (str/includes? judge-model "/")
                                  judge-model
                                  (str "openai/" judge-model))]

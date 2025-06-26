@@ -23,10 +23,8 @@
               yaml-str (or (second (re-find yaml-regex eval-content)) eval-content)
               eval-meta (yaml/parse-string yaml-str)]
           (merge base-result eval-meta))
-
         (:error output-meta)
         (assoc base-result :grade "F" :rationale (:error output-meta))
-
         :else
         base-result))
     (catch Exception e nil)))
@@ -47,13 +45,12 @@
 
 (defn generate-report [experiment-dir]
   (println (str "Generating report for experiment: " experiment-dir "\n"))
-  (let [;; --- NEW LOGIC: Find primary outputs, not .eval files ---
-        output-files (->> (io/file experiment-dir)
-                          (file-seq)
-                          (filter #(and (.isFile %)
-                                        (str/ends-with? (.getName %) ".md")
-                                        (not (re-find #"^(inputs|templates)$"
-                                                      (-> % .getParentFile .getName))))))
+  (let [results-root (io/file experiment-dir "results")
+        output-files (when (.exists results-root)
+                       (->> results-root
+                            (file-seq)
+                            (filter #(and (.isFile %)
+                                          (str/ends-with? (.getName %) ".md")))))
         parsed-data (remove nil? (map get-trial-result output-files))
         summaries (->> (group-by :combo parsed-data)
                        (map (fn [[combo results]] (calculate-summary combo results)))

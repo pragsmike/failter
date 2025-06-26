@@ -1,130 +1,87 @@
-Review
----
+### 1 · Purpose & High-level Impression
 
-## 🧠 Concept & Design
-
-**Failter** is a highly modular, CLI-first framework for LLM-based text transformation experiments. It stands out for its:
-
-* Prompt-centric architecture
-* Model-agnostic design via [LiteLLM](https://github.com/BerriAI/litellm)
-* Automation of evaluation and reporting
-* Clean, introspectable outputs using YAML frontmatter
-
-These design choices are solid and well-justified, especially for iterative research workflows involving prompt and model comparison.
+Failter is now a **mature, CLI-centric framework for prompt-and-model experimentation**.  Its philosophy—*treat prompts as code and the filesystem as a database*—is clearly documented and faithfully implemented in the codebase and docs .  The current revision adds polished user docs, richer reports, and the first unit-test scaffolding, moving the project from “promising prototype” to something a small team could safely adopt.
 
 ---
 
-## ✅ Strengths
+### 2 · Documentation
 
-### 1. **Excellent Modularity**
+* **README + USAGE + DESIGN** form a coherent trilogy: quick pitch, hands-on tutorial, and deep architecture tour.  The user guide walks through directory layout, commands, and interpretation of reports with concrete examples .
+* The design doc diagrams the three-stage pipeline and explains every namespace’s responsibility .
+* Cross-linking between the docs is complete, so newcomers can jump smoothly among them.
 
-Each responsibility is cleanly separated into its own namespace:
-
-* `runner`: single trial execution
-* `experiment`: trial orchestration
-* `evaluator`: LLM-based grading
-* `reporter`: aggregation & metrics
-* `frontmatter`: YAML parsing
-* `llm-interface`: LiteLLM abstraction
-
-This makes the system easy to maintain, extend, or even re-platform.
+**Suggestion** – include the workflow diagram as an SVG in the repo so it renders on GitHub, not just in the ASCII block.
 
 ---
 
-### 2. **Thoughtful Evaluation Process**
+### 3 · Architecture & Workflow
 
-The judge model is given a detailed and well-written prompt that emphasizes fidelity to the instructions. It outputs structured YAML grades with rationale, which can be automatically parsed and included in reports.
+Failter’s pipeline is now:
 
-This level of rigor is rare in tooling aimed at prompt engineering.
+1. **experiment** – enumerate every `(input × template × model)` combo and write parameters to `results/…` folders.
+2. **evaluate** – call a judge LLM with a detailed rubric prompt and emit `.eval` YAML.
+3. **report** – aggregate front-matter metadata into both a markdown and CSV report.
 
----
-
-### 3. **Resilience Built-In**
-
-* Skips previously completed trials and evaluations
-* Records errors in frontmatter instead of crashing
-* Retry-safe and deterministic structure using filesystem-as-database approach
-
-These are signs of mature, practical design thinking.
+The orchestration code is isolated in `experiment.clj`, and execution logic lives in `runner.clj`; the two are joined only by a thin `trial-fn` contract, a clean separation of concerns .
 
 ---
 
-### 4. **Rich Diagnostics**
+### 4 · Code Quality Highlights
 
-Capturing `<think>` or `<scratchpad>` tags into `.thoughts` files is a brilliant idea. It gives users insight into *why* a model responded a certain way—essential when comparing behaviors across models.
+| Module                | Notable strengths                                                                                                                                                                   |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **runner.clj**        | Front-matter aware: passes only the body to the LLM and writes enriched YAML on return.  It also extracts `<think>`/`<scratchpad>` blocks into `.thoughts` files for introspection. |
+| **evaluator.clj**     | Skips already-graded outputs, builds a composite judge prompt, and catches errors so a single bad file doesn’t kill the run.                                                        |
+| **reporter.clj**      | Groups by `(model, template)` rather than directory names, computes robust averages, and now writes both markdown and proper CSV via `clojure-csv` .                                |
+| **frontmatter.clj**   | Uses `yaml/generate-string :flow-style :block` so lists always round-trip cleanly .                                                                                                 |
+| **llm-interface.clj** | Logs full JSON, normalises usage/cost fields, and returns explicit `:error` maps on any failure path .                                                                              |
 
----
-
-### 5. **Minimal External Dependencies**
-
-Just a few thoughtful Clojure libraries (`clj-http`, `cheshire`, `clj-yaml`, `tools.cli`) keep the project lean.
-
----
-
-## 🛠️ Suggestions for Improvement
-
-### 1. **Execution Context Awareness**
-
-Currently, `evaluate` assumes the output filename matches the input. If output filenames are renamed (e.g., hash-based deduplication), this might break. Suggestion:
-
-* Add `input-filename` or hash to frontmatter
-* Use that to reconstruct paths more robustly
+Overall, namespaces are single-purpose, functions are small, and error handling is consistent.
 
 ---
 
-### 2. **Graceful Fallbacks for Judge Model Errors**
+### 5 · Build & Tests
 
-When judge model calls fail:
+* Dependency footprint is still lean (≈ 9 runtime libs) and now includes `clojure-csv` for reporting and Cognitect’s test runner for CI .
+* Two initial tests for front-matter and reporter behaviour were added (visible in the pack script), giving a scaffold for future coverage.
 
-* Currently, no `.eval` file is written
-* Consider writing a stub `.eval` with `"grade: F"` and `"rationale: Judge LLM failed"`
-
----
-
-### 3. **Report Usability**
-
-Consider offering:
-
-* CSV or JSON export option
-* Web/HTML visualization (even via static HTML)
-* Grade trends over time (versioned experiments)
+**Suggestion** – add mocks around `llm/call-model` so runner/evaluator logic can be unit-tested without hitting an API.
 
 ---
 
-### 4. **Workflow Diagram and Example Pack**
+### 6 · Strengths Summarised
 
-As noted earlier, a rendered architecture or flowchart + tiny experiment (`inputs/`, `templates/`, `models.txt`) would help new users a lot.
-
----
-
-### 5. **Unit Tests**
-
-There is a test alias in `deps.edn`, but no `test/` folder or test code included in the archive. Would suggest:
-
-* Adding basic tests for frontmatter parsing and model response parsing
-* Using fixtures to validate prompt injection
+* **Prompt-as-logic**: normal people can tweak behaviour without touching code.
+* **Filesystem-as-DB**: every artefact is portable and git-diffable.
+* **Idempotent & resumable**: existing outputs/evals are skipped, errors are embedded in YAML.
+* **Diagnostics**: `.thoughts` capture chain-of-thought for post-mortems.
+* **Dual-format reports**: human-readable table plus spreadsheet-ready CSV.
 
 ---
 
-## 🧩 Unique Ideas That Stand Out
+### 7 · Areas for Further Polish
 
-* **Prompt-as-logic** via natural language templates
-* **Judge-as-evaluator** separated from transformers
-* **Filesystem-as-state** for idempotency and traceability
-* **Monologue scraping** for introspection of chain-of-thought
+| Item                                      | Why it matters                                       | Quick remedy                                               |
+| ----------------------------------------- | ---------------------------------------------------- | ---------------------------------------------------------- |
+| **Hard-coded LiteLLM endpoint**           | Users may run a remote proxy.                        | Read `LITELLM_ENDPOINT` env var with localhost as default. |
+| **CSV line endings**                      | Windows Excel sometimes mis-parses `\n`.             | Pass `:newline "\r\n"` to `write-csv`.                     |
+| **Average cost when some runs lack cost** | Currently averages over nils → shows `0.0`.          | Filter nils before averaging in `calculate-summary`.       |
+| **Judge failures leave no `.eval`**       | Down-stream tooling treats file as “not yet graded”. | Write stub YAML (`grade: "F"`, rationale) on error.        |
+| **Sequential trial loop**                 | Large grids can take hours.                          | Add `--parallel N` flag using `pmap` or `core.async`.      |
 
-All of these are forward-thinking patterns that align with the future of LLM tooling.
+None of these are architectural; each is an isolated patch.
 
 ---
 
-## 🏁 Verdict
+### 8 · Road-map Ideas
 
-**Failter is a thoughtfully engineered, practical, and extensible tool for rigorous LLM evaluation.** It combines software engineering discipline with LLM-native design philosophy and is suitable for serious experimentation work.
+1. **JSON reporter** (trivial with new `format-as-csv` helper).
+2. **Web dashboard** – static HTML/HTMX that reads the CSV for interactive filtering.
+3. **Multi-judge voting** – store per-judge grades in front-matter and compute consensus scores.
+4. **Plugin API** – allow custom fitness metrics for evolutionary prompt search.
 
-If you plan to continue developing it, it has the potential to serve:
+---
 
-* Prompt engineers tuning transformations
-* Researchers comparing LLM behavior
-* Developers seeking clean LLM pipelines
+### 9 · Verdict
 
-Would you like recommendations for packaging it as a public CLI tool, or adapting it for GUI use?
+The current revision of Failter is **production-ready for small- to medium-scale prompt experimentation**.  Clear docs, tidy Clojure code, and robust file-based artefacts make it practical for teams who care about reproducibility and audit trails. Addressing the small nits above and growing test coverage will lock in long-term maintainability, but the core engine is solid and thoughtfully engineered.

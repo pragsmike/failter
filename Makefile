@@ -14,5 +14,5 @@ pack:
   echo evaluation-prompt.md; echo -----; \
   cat prompts/evaluation-prompt.md ; \
 	echo Source files; echo -----; \
-	cat src/failter/*.clj ) >~/failter-pack.txt
+	cat src/failter/*.clj ; cat test/failter/*.clj) >~/failter-pack.txt
 

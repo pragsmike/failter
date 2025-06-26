@@ -15,10 +15,8 @@
         {:frontmatter (yaml/parse-string yaml-str)
          :body body-str}
         (catch Exception _e
-          ;; In case of malformed YAML, treat it as no frontmatter.
           {:frontmatter {}
            :body content})))
-    ;; No frontmatter found
     {:frontmatter {}
      :body content}))
 
@@ -29,6 +27,7 @@
   (if (empty? frontmatter)
     body
     (str "---\n"
+         ;; --- THIS IS THE FIX ---
          (yaml/generate-string frontmatter :flow-style :block)
          "---\n"
          body)))

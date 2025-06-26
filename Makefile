@@ -9,7 +9,7 @@ test:
 
 
 pack:
-	(for i in README.md USAGE.md docs/DESIGN.md deps.edn Makefile model-names.txt ;\
+	(for i in README.md USAGE.md docs/DESIGN.md deps.edn Makefile model-names.txt copilot/onboard-1.md ;\
 	   do echo $$i; cat $$i; echo ---- ; done ;\
   echo evaluation-prompt.md; echo -----; \
   cat prompts/evaluation-prompt.md ; \

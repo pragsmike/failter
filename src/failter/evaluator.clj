@@ -4,23 +4,62 @@
             [failter.frontmatter :as fm]
             [failter.llm-interface :as llm]))
 
-(def JUDGE_MODEL "gpt-4o") ; Default model name, now without the provider
+(def JUDGE_MODEL "gpt-4o")
 (def EVALUATION_PROMPT_PATH "prompts/evaluation-prompt.md")
 
-(defn- evaluate-one-file
-  "Private function to perform the evaluation of a single output file."
-  [{:keys [judge-model template-path input-path output-path]}]
-  (try
-    (println "--- Evaluating Trial Output (Body-only) ---")
-    (let [eval-prompt-template (slurp EVALUATION_PROMPT_PATH)
-          original-input-body  (:body (fm/parse-file-content (slurp input-path)))
-          prompt-template      (slurp template-path)
-          generated-output-body(:body (fm/parse-file-content (slurp output-path)))
+(defn- find-all-trial-outputs
+  "Finds all primary .md output files within an experiment's results directory."
+  [experiment-dir]
+  (let [results-root (io/file experiment-dir "results")]
+    (when (.exists results-root)
+      (->> results-root
+           (file-seq)
+           (filter #(and (.isFile %)
+                         (str/ends-with? (.getName %) ".md")))))))
 
+(defn- build-evaluation-context
+  "Gathers all file paths, content, and metadata needed for one evaluation.
+  Returns a context map, including a :valid? flag and a :reason for skipping."
+  [experiment-dir output-file]
+  (let [output-path (.getPath output-file)
+        eval-path   (io/file (str output-path ".eval"))]
+    (if (.exists eval-path)
+      {:valid? false :reason "already evaluated" :output-path output-path}
+      (try
+        (let [output-content (fm/parse-file-content (slurp output-file))
+              metadata (:frontmatter output-content)
+              template-name (:filtered-by-template metadata)
+              input-name (.getName output-file)]
+          (cond
+            (:error metadata)
+            {:valid? false :reason "runner failed" :output-path output-path}
+
+            (not template-name)
+            {:valid? false :reason "missing metadata" :output-path output-path}
+
+            :else
+            (let [template-path (io/file experiment-dir "templates" template-name)
+                  input-path (io/file experiment-dir "inputs" input-name)]
+              {:valid? true
+               :output-path output-path
+               :output-content (:body output-content)
+               :input-path (.getPath input-path)
+               :input-content (:body (fm/parse-file-content (slurp input-path)))
+               :template-path (.getPath template-path)
+               :template-content (slurp template-path)})))
+        (catch Exception e
+          {:valid? false :reason (str "file read error: " (.getMessage e)) :output-path output-path})))))
+
+(defn- evaluate-one-file
+  "Private function to perform the evaluation of a single output file, using a context map."
+  [judge-model {:keys [input-content template-content output-content output-path]}]
+  (try
+    (println "--- Evaluating Trial Output ---")
+    (let [eval-prompt-template (slurp EVALUATION_PROMPT_PATH)
           final-prompt (-> eval-prompt-template
-                           (str/replace "{{ORIGINAL_INPUT}}" original-input-body)
-                           (str/replace "{{PROMPT_TEMPLATE}}" prompt-template)
-                           (str/replace "{{GENERATED_OUTPUT}}" generated-output-body))
+                           (str/replace "{{ORIGINAL_INPUT}}" input-content)
+                           (str/replace "{{PROMPT_TEMPLATE}}" template-content)
+                           (str/replace "{{GENERATED_OUTPUT}}" output-content))
 
           _ (println (str "  Judge Model: " judge-model "  Output File: " output-path))
           eval-response (llm/call-model judge-model final-prompt :timeout 600000)
@@ -34,35 +73,21 @@
     (catch Exception e
       (println (str "ERROR: An unexpected error occurred during evaluation of " output-path ": " (.getMessage e))))))
 
+(defn- run-evaluations-for-contexts
+  "Iterates over a sequence of contexts, evaluating the valid ones."
+  [judge-model contexts]
+  (doseq [context contexts]
+    (if (:valid? context)
+      (evaluate-one-file judge-model context)
+      (println (str "Skipping (" (:reason context) "): " (:output-path context))))))
+
 (defn run-evaluation
   "Scans an experiment directory for outputs and runs the evaluation process on them."
   [experiment-dir & {:keys [judge-model] :or {judge-model JUDGE_MODEL}}]
-  (let [;; --- THIS IS THE NEW LOGIC ---
-        normalized-judge-model (if (str/includes? judge-model "/")
+  (let [normalized-judge-model (if (str/includes? judge-model "/")
                                  judge-model
-                                 (str "openai/" judge-model))
-        _ (println (str "Starting evaluation for experiment in: " experiment-dir " using judge: " normalized-judge-model))
-        results-root (io/file experiment-dir "results")
-        output-files (when (.exists results-root)
-                       (->> results-root
-                            (file-seq)
-                            (filter #(and (.isFile %)
-                                          (str/ends-with? (.getName %) ".md")))))]
-    (doseq [output-file output-files
-            :let [output-path (.getPath output-file)
-                  eval-path   (io/file (str output-path ".eval"))
-                  metadata    (:frontmatter (fm/parse-file-content (slurp output-file)))]]
-      (cond
-        (.exists eval-path)
-        (println (str "Skipping (already evaluated): " output-path))
-        (:error metadata)
-        (println (str "Skipping (runner failed):       " output-path))
-        (not (:filtered-by-template metadata))
-        (println (str "Skipping (missing metadata):    " output-path))
-        :else
-        (let [template-path (str (io/file experiment-dir "templates" (:filtered-by-template metadata)))
-              input-path    (str (io/file experiment-dir "inputs" (.getName output-file)))]
-          (evaluate-one-file {:judge-model   normalized-judge-model
-                              :template-path template-path
-                              :input-path    input-path
-                              :output-path   output-path}))))))
+                                 (str "openai/" judge-model))]
+    (println (str "Starting evaluation for experiment in: " experiment-dir " using judge: " normalized-judge-model))
+    (->> (find-all-trial-outputs experiment-dir)
+         (map #(build-evaluation-context experiment-dir %))
+         (run-evaluations-for-contexts normalized-judge-model))))

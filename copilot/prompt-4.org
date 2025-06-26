@@ -1,0 +1,14 @@
+I have changed the timeout on runner call-model calls to 60000 millis.
+
+Include the execution time in the front matter metadata in the output file.
+
+If an error occurs in call-model, such as a timeout, create the output file containing
+only the front matter, including a key that indicates what the error was and the execution-time key.
+
+Modify the evaluator so it uses the metadata from the file,
+rather than inferring model and template from the directory name.
+
+The report must include the execution time for the transformation.
+
+Is there a way to estimate the cost of the transformation?
+That should also be in the metadata and in the report.

@@ -2,18 +2,16 @@
   (:require [clj-http.client :as http]
             [clojure.data.json :as json]))
 
-(def LITELLM_ENDPOINT "http://localhost:8000/chat/completions") ; Default LiteLLM endpoint
+(def LITELLM_ENDPOINT "http://localhost:8000/chat/completions")
 (def LITELLM_API_KEY (System/getenv "LITELLM_API_KEY"))
-(def DEFAULT_TIMEOUT_MS 300000) ; Default timeout of 5 minutes
+(def DEFAULT_TIMEOUT_MS 300000)
 
 (defn pre-flight-checks []
   (when-not (seq LITELLM_API_KEY)
     (println "---")
     (println "ERROR: LITELLM_API_KEY environment variable not set.")
     (println "Please set it before running the application.")
-    (println "Example: export LITELLM_API_KEY='your-proxy-key'")
-    (println "---")
-    (System/exit 1)) ; Exit if the key is missing
+    (System/exit 1))
   true)
 
 (defn- parse-llm-response [response-body model-name]
@@ -22,26 +20,26 @@
     (let [parsed-body (json/read-str response-body :key-fn keyword)
           content (-> parsed-body :choices first :message :content)]
       (if content
-        content
+        ;; Return a rich map instead of just the content string
+        {:content content
+         :usage (:usage parsed-body)
+         :cost (get-in parsed-body [:choices 0 :message :tool_calls 0 :function :arguments :cost])} ; Specific to LiteLLM cost tracking
         (do
           (println (str "ERROR: Could not extract content from LLM response for " model-name ". Body: " response-body))
-          (json/write-str {:error (str "No content in LLM response: " (pr-str parsed-body))}))))
+          {:error (str "No content in LLM response: " (pr-str parsed-body))})))
     (catch Exception e
       (println (str "ERROR: Failed to parse LLM JSON response for " model-name ". Error: " (.getMessage e) ". Body: " response-body))
-      (json/write-str {:error (str "Malformed JSON from LLM: " (.getMessage e))}))))
+      {:error (str "Malformed JSON from LLM: " (.getMessage e))})))
 
 (defn call-model
   "Makes an actual HTTP call to the LiteLLM endpoint.
-  Accepts an optional :timeout key in milliseconds."
+  Returns a map with :content, :usage, :cost or an :error key."
   [model-name prompt-string & {:keys [timeout] :or {timeout DEFAULT_TIMEOUT_MS}}]
   (println (str "\n;; --- ACTUALLY Calling LLM: " model-name " via " LITELLM_ENDPOINT " ---"))
   (println (str ";; --- Using timeout: " timeout "ms ---"))
-  #_(println (str "\nPrompt: \n" prompt-string))
   (try
     (let [request-body {:model model-name
                         :messages [{:role "user" :content prompt-string}]}
-
-
           headers {"Authorization" (str "Bearer " LITELLM_API_KEY)}
           response (http/post LITELLM_ENDPOINT
                               {:body (json/write-str request-body)
@@ -49,14 +47,13 @@
                                :accept :json
                                :headers headers
                                :throw-exceptions false
-                               :socket-timeout timeout      ;; <--- MODIFIED
-                               :connection-timeout timeout  ;; <--- MODIFIED
-                               })]
+                               :socket-timeout timeout
+                               :connection-timeout timeout})]
       (if (= 200 (:status response))
         (parse-llm-response (:body response) model-name)
         (do
           (println (str "ERROR: LLM call to " model-name " failed with status " (:status response) ". Body: " (:body response)))
-          (json/write-str {:error (str "LLM API Error: " (:status response) " " (:body response))}))))
+          {:error (str "LLM API Error: " (:status response) " " (:body response))})))
     (catch Exception e
       (println (str "ERROR: Exception during LLM call to " model-name ". Error: " (.getMessage e)))
-      (json/write-str {:error (str "Network or client exception: " (.getMessage e))}))))
+      {:error (str "Network or client exception: " (.getMessage e))})))

@@ -8,13 +8,10 @@
 (def EVALUATION_PROMPT_PATH "prompts/evaluation-prompt.md")
 
 (defn- evaluate-one-file
-  "Private function to perform the evaluation of a single output file,
-  now using only the body of the text."
+  "Private function to perform the evaluation of a single output file."
   [{:keys [judge-model template-path input-path output-path]}]
   (try
     (println "--- Evaluating Trial Output (Body-only) ---")
-    (println (str "  Judge Model: " judge-model "  Output File: " output-path))
-
     (let [eval-prompt-template (slurp EVALUATION_PROMPT_PATH)
           original-input-body  (:body (fm/parse-file-content (slurp input-path)))
           prompt-template      (slurp template-path)
@@ -25,48 +22,40 @@
                            (str/replace "{{PROMPT_TEMPLATE}}" prompt-template)
                            (str/replace "{{GENERATED_OUTPUT}}" generated-output-body))
 
-          _ (println "  Sending request to Judge LLM...")
+          _ (println (str "  Judge Model: " judge-model "  Output File: " output-path))
           eval-response (llm/call-model judge-model final-prompt :timeout 600000)
           eval-file-path (str output-path ".eval")]
 
-      (if (str/starts-with? eval-response "{\"error\":")
-        (println (str "ERROR: Judge LLM failed for " output-path "\n" eval-response))
+      (if (:error eval-response)
+        (println (str "ERROR: Judge LLM failed for " output-path "\n" (:error eval-response)))
         (do
-          (spit eval-file-path eval-response)
-          (println (str "  Writing evaluation to: " eval-file-path) "\n--- Evaluation Complete ---\n"))))
+          (spit eval-file-path (:content eval-response))
+          (println (str "  Writing evaluation to: " eval-file-path)))))
     (catch Exception e
       (println (str "ERROR: An unexpected error occurred during evaluation of " output-path ": " (.getMessage e))))))
 
 (defn run-evaluation
-  "Scans an experiment directory for outputs and runs the evaluation process on them."
+  "Scans an experiment directory for outputs and runs the evaluation process on them,
+  now reading metadata from the output file itself."
   [experiment-dir & {:keys [judge-model] :or {judge-model JUDGE_MODEL}}]
   (println (str "Starting evaluation for experiment in: " experiment-dir))
-  (let [exp-dir-file (io/file experiment-dir)
-        result-dirs  (->> (.listFiles exp-dir-file)
-                          (filter #(.isDirectory %))
-                          (filter #(not (#{"inputs" "templates"} (.getName %)))))]
-
-    (doseq [dir result-dirs]
-      (let [output-files (->> (.listFiles dir)
-                              (filter #(.isFile %))
-                              (filter #(not (str/ends-with? (.getName %) ".eval"))))]
-        (doseq [output-file output-files
-                :let [output-path (.getPath output-file)
-                      eval-path   (str output-path ".eval")]]
-          (if (.exists (io/file eval-path))
-            (println (str "Skipping existing evaluation: " eval-path))
-            (let [output-dir-name (.getName dir)
-                  last-underscore (str/last-index-of output-dir-name "_")
-
-                  ;; Reverse-engineer the original template name
-                  sanitized-template-name (subs output-dir-name (inc last-underscore))
-                  template-filename (str sanitized-template-name ".md")
-                  template-path (-> (io/file experiment-dir "templates" template-filename) .getPath)
-
-                  ;; Reverse-engineer the original input path
-                  input-filename (.getName output-file)
-                  input-path (-> (io/file experiment-dir "inputs" input-filename) .getPath)]
-
+  (let [output-files (->> (io/file experiment-dir)
+                          (file-seq)
+                          (filter #(.isFile %))
+                          ;; --- THIS IS THE CORRECTED LINE ---
+                          ;; It now correctly finds files in directories that are NOT 'inputs' or 'templates'.
+                          (filter #(not (re-find #"^(inputs|templates)$" (-> % .getParentFile .getName))))
+                          (remove #(str/ends-with? (.getName %) ".eval")))]
+    (doseq [output-file output-files
+            :let [output-path (.getPath output-file)
+                  eval-path   (str output-path ".eval")]]
+      (if (.exists (io/file eval-path))
+        (println (str "Skipping existing evaluation: " eval-path))
+        (let [metadata (:frontmatter (fm/parse-file-content (slurp output-file)))]
+          (if (or (not (:filtered-by-template metadata)) (:error metadata))
+            (println (str "Skipping evaluation for file with error or missing metadata: " output-path))
+            (let [template-path (str (io/file experiment-dir "templates" (:filtered-by-template metadata)))
+                  input-path (str (io/file experiment-dir "inputs" (.getName output-file)))]
               (evaluate-one-file {:judge-model   judge-model
                                   :template-path template-path
                                   :input-path    input-path

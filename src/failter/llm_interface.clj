@@ -20,10 +20,9 @@
     (let [parsed-body (json/read-str response-body :key-fn keyword)
           content (-> parsed-body :choices first :message :content)]
       (if content
-        ;; Return a rich map instead of just the content string
         {:content content
          :usage (:usage parsed-body)
-         :cost (get-in parsed-body [:choices 0 :message :tool_calls 0 :function :arguments :cost])} ; Specific to LiteLLM cost tracking
+         :cost (:cost parsed-body)} ; <-- SIMPLIFIED AND CORRECTED
         (do
           (println (str "ERROR: Could not extract content from LLM response for " model-name ". Body: " response-body))
           {:error (str "No content in LLM response: " (pr-str parsed-body))})))

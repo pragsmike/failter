@@ -87,10 +87,8 @@
 
 (defn run-evaluation
   [experiment-dir & {:keys [judge-model] :or {judge-model (:default-judge-model evaluator-config)}}]
-  (let [normalized-judge-model (if (str/includes? judge-model "/")
-                                 judge-model
-                                 (str "openai/" judge-model))]
-    (println (str "Starting evaluation for experiment in: " experiment-dir " using judge: " normalized-judge-model))
-    (->> (find-all-trial-outputs experiment-dir)
-         (map #(build-evaluation-context experiment-dir %))
-         (run-evaluations-for-contexts normalized-judge-model))))
+
+  (println (str "Starting evaluation for experiment in: " experiment-dir " using judge: " judge-model))
+  (->> (find-all-trial-outputs experiment-dir)
+       (map #(build-evaluation-context experiment-dir %))
+       (run-evaluations-for-contexts judge-model)))

@@ -4,15 +4,15 @@
             [clojure.string :as str]
             [clojure.java.io :as io]
             [failter.exp-paths :as exp-paths]
+            [failter.log :as log]
             [failter.trial :as trial]))
 
 (defn run-single-trial
-  "Executes a single filtering trial defined by a Trial record."
   [^failter.trial.Trial trial]
   (let [{:keys [model-name template-path input-path output-path]} trial]
-    (println "--- Running Trial (Frontmatter-aware) ---")
-    (println (str "  Model: " model-name))
-    (println (str "  Template: " template-path))
+    (log/info "--- Running Trial (Frontmatter-aware) ---")
+    (log/info (str "  Model: " model-name))
+    (log/info (str "  Template: " template-path))
 
     (let [input-content (slurp input-path)
           {:keys [frontmatter body]} (fm/parse-file-content input-content)
@@ -33,7 +33,7 @@
       (if-let [error-msg (:error llm-response)]
         (let [error-metadata (assoc base-metadata :error error-msg)
               final-content (fm/serialize error-metadata "")]
-          (println (str "  LLM call failed. Writing error metadata to: " output-path))
+          (log/info (str "  LLM call failed. Writing error metadata to: " output-path))
           (spit output-path final-content))
 
         (let [monologue-content-regex #"(?s)<(?:think|scratchpad)>(.*?)</(?:think|scratchpad)>"
@@ -47,16 +47,15 @@
               final-content (fm/serialize success-metadata cleaned-content)
               thoughts-path (exp-paths/thoughts-path output-path)]
 
-          (println (str "  LLM call succeeded. Writing response to: " output-path))
+          (log/info (str "  LLM call succeeded. Writing response to: " output-path))
           (spit output-path final-content)
 
           (when (and thoughts (not (str/blank? thoughts)))
-            (println (str "  Extracted monologue. Writing to: " thoughts-path))
+            (log/info (str "  Extracted monologue. Writing to: " thoughts-path))
             (spit thoughts-path thoughts))))
 
-      (println "--- Trial Complete ---\n"))))
+      (log/info "--- Trial Complete ---\n"))))
 
 (defn live-trial-runner
-  "The function passed to conduct-experiment for live runs."
   [trial]
   (run-single-trial trial))

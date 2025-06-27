@@ -5,8 +5,9 @@
         clj-http/clj-http   {:mvn/version "3.12.3"}
         cheshire/cheshire   {:mvn/version "5.12.0"}
         clojure-csv/clojure-csv {:mvn/version "2.0.2"}
-        org.clojure/tools.cli {:mvn/version "1.0.219"}   ; For CLI options
-        clj-commons/clj-yaml {:mvn/version "1.0.29"}}
+        org.clojure/tools.cli {:mvn/version "1.0.219"}
+        clj-commons/clj-yaml {:mvn/version "1.0.29"}
+        com.taoensso/telemere {:mvn/version "1.0.1"}}
 
  :aliases
  {:run {:main-opts ["-m" "failter.core"]}

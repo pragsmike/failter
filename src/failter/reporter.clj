@@ -2,7 +2,8 @@
   (:require [clojure.string :as str]
             [clojure-csv.core :as csv]
             [failter.eval :as feval]
-            [failter.exp-paths :as exp-paths]))
+            [failter.exp-paths :as exp-paths]
+            [failter.log :as log]))
 
 (def grade-scores {"A" 5 "B" 4 "C" 3 "D" 2 "F" 1})
 
@@ -70,7 +71,7 @@
     (csv/write-csv data-to-write)))
 
 (defn generate-report [experiment-dir]
-  (println (str "Generating report for experiment: " experiment-dir))
+  (log/info (str "Generating report for experiment: " experiment-dir))
   (let [evals (feval/read-all-evals experiment-dir)
         combo-key (fn [e] [(-> e :trial :model-name) (-> e :trial :template-path)])
         summaries (->> evals
@@ -86,12 +87,12 @@
         report-md-path  (exp-paths/report-md-path experiment-dir)
         report-csv-path (exp-paths/report-csv-path experiment-dir)]
 
-    (println "\n--- Experiment Report ---\n")
-    (println table-string)
+    (log/info "--- Experiment Report ---")
+    (log/info table-string)
 
-    (println (str "\nWriting markdown report to: " report-md-path))
+    (log/info (str "Writing markdown report to: " report-md-path))
     (spit report-md-path table-string)
 
-    (println (str "Writing CSV report to:      " report-csv-path))
+    (log/info (str "Writing CSV report to:      " report-csv-path))
     (spit report-csv-path csv-string)
-    (println "\nReport generation complete.")))
+    (log/info "Report generation complete.")))

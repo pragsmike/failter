@@ -87,8 +87,8 @@
         report-md-path  (exp-paths/report-md-path experiment-dir)
         report-csv-path (exp-paths/report-csv-path experiment-dir)]
 
-    (log/info "--- Experiment Report ---")
-    (log/info table-string)
+    (log/info "\n--- Experiment Report ---")
+    (log/info (str "\n" table-string))
 
     (log/info (str "Writing markdown report to: " report-md-path))
     (spit report-md-path table-string)

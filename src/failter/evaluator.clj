@@ -1,15 +1,11 @@
 (ns failter.evaluator
   (:require [clojure.string :as str]
             [clojure.java.io :as io]
+            [failter.config :as config]
             [failter.frontmatter :as fm]
             [failter.llm-interface :as llm]
             [failter.exp-paths :as exp-paths]
             [failter.util :as util]))
-
-(def evaluator-config
-  {:default-judge-model "openai/gpt-4o"
-   :prompts {:standard "prompts/evaluation-prompt.md"
-             :ground-truth "prompts/evaluation-prompt-gt.md"}})
 
 (defn- build-evaluation-context
   [experiment-dir output-file]
@@ -48,16 +44,15 @@
 
 (defn- build-judge-prompt
   [{:keys [has-ground-truth? ground-truth-content input-content template-content output-content]}]
-  (if has-ground-truth?
-    (let [prompt-path (get-in evaluator-config [:prompts :ground-truth])
-          eval-prompt-template (slurp prompt-path)]
+  (let [prompt-key (if has-ground-truth? :ground-truth :standard)
+        prompt-path (get-in config/config [:evaluator :prompts prompt-key])
+        eval-prompt-template (slurp prompt-path)]
+    (if has-ground-truth?
       (-> eval-prompt-template
           (str/replace "{{ORIGINAL_INPUT}}" input-content)
           (str/replace "{{PROMPT_TEMPLATE}}" template-content)
           (str/replace "{{GROUND_TRUTH_EXAMPLE}}" ground-truth-content)
-          (str/replace "{{GENERATED_OUTPUT}}" output-content)))
-    (let [prompt-path (get-in evaluator-config [:prompts :standard])
-          eval-prompt-template (slurp prompt-path)]
+          (str/replace "{{GENERATED_OUTPUT}}" output-content))
       (-> eval-prompt-template
           (str/replace "{{ORIGINAL_INPUT}}" input-content)
           (str/replace "{{PROMPT_TEMPLATE}}" template-content)
@@ -92,8 +87,8 @@
       (println (str "Skipping (" (:reason context) "): " (:output-path context))))))
 
 (defn run-evaluation
-  [experiment-dir & {:keys [judge-model] :or {judge-model (:default-judge-model evaluator-config)}}]
+  [experiment-dir & {:keys [judge-model] :or {judge-model (get-in config/config [:evaluator :default-judge-model])}}]
   (println (str "Starting evaluation for experiment in: " experiment-dir " using judge: " judge-model))
-  (->> (exp-paths/find-all-result-files experiment-dir) ; Updated call
+  (->> (exp-paths/find-all-result-files experiment-dir)
        (map #(build-evaluation-context experiment-dir %))
        (run-evaluations-for-contexts judge-model)))

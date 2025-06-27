@@ -1,6 +1,7 @@
 (ns failter.core
   (:require [clojure.tools.cli :as cli]
             [clojure.string :as str]
+            [failter.config :as config] ; <-- Added
             [failter.llm-interface :as llm]
             [failter.runner :as runner]
             [failter.experiment :as experiment]
@@ -8,10 +9,8 @@
             [failter.reporter :as reporter]))
 
 (def cli-options
-  ;; An option with a required argument
   [["-j" "--judge-model MODEL" "Specify the judge model to use for evaluation"
     :default nil]
-   ;; A boolean option
    ["-d" "--dry-run" "For 'experiment', print trial details without executing"]
    ["-h" "--help" "Print this help message"]])
 
@@ -40,10 +39,8 @@
     (cond
       (:help options)
       (do (println (usage summary)) (System/exit 0))
-
       errors
       (do (println (error-msg errors)) (System/exit 1))
-
       (< (count arguments) 1)
       (do (println (usage summary)) (System/exit 1)))
 
@@ -72,13 +69,14 @@
 
         "single"
         (if (= (count params) 2)
-          (let [[input-file output-file] params]
+          (let [[input-file output-file] params
+                ;; Read from central config
+                single-run-config (:single-run config/config)]
             (runner/run-single-trial
-             {:model-name "ollama/qwen3:32b"
-              :template-path "prompts/cleanup-small-model.md"
+             {:model-name (:model-name single-run-config)
+              :template-path (:template-path single-run-config)
               :input-path    input-file
               :output-path   output-file}))
           (do (println (usage summary)) (System/exit 1)))
 
-        ;; Default case for unknown command
         (println (usage summary))))))

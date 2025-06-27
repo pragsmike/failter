@@ -1,10 +1,9 @@
 (ns failter.llm-interface
   (:require [clj-http.client :as http]
-            [clojure.data.json :as json]))
+            [clojure.data.json :as json]
+            [failter.config :as config])) ; <-- Added
 
-(def LITELLM_ENDPOINT "http://localhost:8000/chat/completions")
 (def LITELLM_API_KEY (System/getenv "LITELLM_API_KEY"))
-(def DEFAULT_TIMEOUT_MS 300000)
 
 (defn pre-flight-checks []
   (when-not (seq LITELLM_API_KEY)
@@ -22,7 +21,7 @@
       (if content
         {:content content
          :usage (:usage parsed-body)
-         :cost (:cost parsed-body)} ; <-- SIMPLIFIED AND CORRECTED
+         :cost (:cost parsed-body)}
         (do
           (println (str "ERROR: Could not extract content from LLM response for " model-name ". Body: " response-body))
           {:error (str "No content in LLM response: " (pr-str parsed-body))})))
@@ -31,28 +30,28 @@
       {:error (str "Malformed JSON from LLM: " (.getMessage e))})))
 
 (defn call-model
-  "Makes an actual HTTP call to the LiteLLM endpoint.
-  Returns a map with :content, :usage, :cost or an :error key."
-  [model-name prompt-string & {:keys [timeout] :or {timeout DEFAULT_TIMEOUT_MS}}]
-  (println (str "\n;; --- ACTUALLY Calling LLM: " model-name " via " LITELLM_ENDPOINT " ---"))
-  (println (str ";; --- Using timeout: " timeout "ms ---"))
-  (try
-    (let [request-body {:model model-name
-                        :messages [{:role "user" :content prompt-string}]}
-          headers {"Authorization" (str "Bearer " LITELLM_API_KEY)}
-          response (http/post LITELLM_ENDPOINT
-                              {:body (json/write-str request-body)
-                               :content-type :json
-                               :accept :json
-                               :headers headers
-                               :throw-exceptions false
-                               :socket-timeout timeout
-                               :connection-timeout timeout})]
-      (if (= 200 (:status response))
-        (parse-llm-response (:body response) model-name)
-        (do
-          (println (str "ERROR: LLM call to " model-name " failed with status " (:status response) ". Body: " (:body response)))
-          {:error (str "LLM API Error: " (:status response) " " (:body response))})))
-    (catch Exception e
-      (println (str "ERROR: Exception during LLM call to " model-name ". Error: " (.getMessage e)))
-      {:error (str "Network or client exception: " (.getMessage e))})))
+  "Makes an actual HTTP call to the LiteLLM endpoint."
+  [model-name prompt-string & {:keys [timeout] :or {timeout (get-in config/config [:llm :default-timeout-ms])}}]
+  (let [endpoint (get-in config/config [:llm :endpoint])]
+    (println (str "\n;; --- ACTUALLY Calling LLM: " model-name " via " endpoint " ---"))
+    (println (str ";; --- Using timeout: " timeout "ms ---"))
+    (try
+      (let [request-body {:model model-name
+                          :messages [{:role "user" :content prompt-string}]}
+            headers {"Authorization" (str "Bearer " LITELLM_API_KEY)}
+            response (http/post endpoint
+                                {:body (json/write-str request-body)
+                                 :content-type :json
+                                 :accept :json
+                                 :headers headers
+                                 :throw-exceptions false
+                                 :socket-timeout timeout
+                                 :connection-timeout timeout})]
+        (if (= 200 (:status response))
+          (parse-llm-response (:body response) model-name)
+          (do
+            (println (str "ERROR: LLM call to " model-name " failed with status " (:status response) ". Body: " (:body response)))
+            {:error (str "LLM API Error: " (:status response) " " (:body response))})))
+      (catch Exception e
+        (println (str "ERROR: Exception during LLM call to " model-name ". Error: " (.getMessage e)))
+        {:error (str "Network or client exception: " (.getMessage e))}))))

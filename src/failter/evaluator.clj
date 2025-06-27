@@ -3,7 +3,8 @@
             [clojure.java.io :as io]
             [failter.frontmatter :as fm]
             [failter.llm-interface :as llm]
-            [failter.exp-paths :as exp-paths]))
+            [failter.exp-paths :as exp-paths]
+            [clj-yaml.core :as yaml]))
 
 (def evaluator-config
   {:default-judge-model "openai/gpt-4o"
@@ -67,12 +68,11 @@
     (let [prompt-path (get-in evaluator-config [:prompts :standard])
           eval-prompt-template (slurp prompt-path)]
       (-> eval-prompt-template
-          (str/replace "{{PROMPT_TEMPLATE}}" template-content)
           (str/replace "{{ORIGINAL_INPUT}}" input-content)
+          (str/replace "{{PROMPT_TEMPLATE}}" template-content)
           (str/replace "{{GENERATED_OUTPUT}}" output-content)))))
 
 (defn- execute-evaluation!
-  "Executes the evaluation and writes the .eval file with evaluation method metadata."
   [judge-model context]
   (try
     (let [final-prompt (build-judge-prompt context)
@@ -81,20 +81,18 @@
           eval-method (if (:has-ground-truth? context) "ground-truth" "rules-based")]
       (println (str "--- Evaluating Trial Output (" eval-method ") ---"))
       (println (str "  Judge Model: " judge-model "  Output File: " output-path))
-
       (let [eval-response (llm/call-model judge-model final-prompt :timeout 600000)]
         (if (:error eval-response)
           (println (str "ERROR: Judge LLM failed for " output-path "\n" (:error eval-response)))
-          (do
-            ;; --- THIS IS THE ROBUST STRING-BASED FIX ---
-            (let [eval-content (:content eval-response)
-                  yaml-regex #"(?s)```yaml\s*(.+?)\s*```"
-                  yaml-str (-> (or (second (re-find yaml-regex eval-content)) eval-content)
-                               str/trim)
-                  method-str (str "evaluation-method: " eval-method)
-                  final-content (str yaml-str "\n" method-str "\n")]
-              (spit eval-file-path final-content)
-              (println (str "  Writing evaluation to: " eval-file-path)))))))
+          (let [eval-content (:content eval-response)
+                yaml-regex #"(?s)```yaml\s*(.+?)\s*```"
+                yaml-str (or (second (re-find yaml-regex eval-content)) eval-content)
+                parsed-yaml (yaml/parse-string yaml-str :keywords false)
+                final-yaml (assoc parsed-yaml "evaluation-method" eval-method)
+                  ;; --- THE CORRECTED API CALL ---
+                final-content (yaml/generate-string final-yaml :dumper-options {:flow-style :block})]
+            (spit eval-file-path final-content)
+            (println (str "  Writing evaluation to: " eval-file-path))))))
     (catch Exception e
       (println (str "ERROR: An unexpected error occurred during evaluation of " (:output-path context) ": " (.getMessage e))))))
 

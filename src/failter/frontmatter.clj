@@ -27,7 +27,7 @@
   (if (empty? frontmatter)
     body
     (str "---\n"
-         ;; --- THIS IS THE FIX ---
-         (yaml/generate-string frontmatter :flow-style :block)
+         ;; --- THE CORRECTED API CALL ---
+         (yaml/generate-string frontmatter :dumper-options {:flow-style :block})
          "---\n"
          body)))

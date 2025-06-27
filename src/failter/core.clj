@@ -1,12 +1,13 @@
 (ns failter.core
   (:require [clojure.tools.cli :as cli]
             [clojure.string :as str]
-            [failter.config :as config] ; <-- Added
+            [failter.config :as config]
             [failter.llm-interface :as llm]
             [failter.runner :as runner]
             [failter.experiment :as experiment]
             [failter.evaluator :as evaluator]
-            [failter.reporter :as reporter]))
+            [failter.reporter :as reporter]
+            [failter.trial :as trial]))
 
 (def cli-options
   [["-j" "--judge-model MODEL" "Specify the judge model to use for evaluation"
@@ -70,13 +71,13 @@
         "single"
         (if (= (count params) 2)
           (let [[input-file output-file] params
-                ;; Read from central config
-                single-run-config (:single-run config/config)]
-            (runner/run-single-trial
-             {:model-name (:model-name single-run-config)
-              :template-path (:template-path single-run-config)
-              :input-path    input-file
-              :output-path   output-file}))
+                single-run-config (:single-run config/config)
+                ;; Construct a Trial record directly for the single-run case
+                trial (trial/->Trial (:model-name single-run-config)
+                                     (:template-path single-run-config)
+                                     input-file
+                                     output-file)]
+            (runner/run-single-trial trial))
           (do (println (usage summary)) (System/exit 1)))
 
         (println (usage summary))))))

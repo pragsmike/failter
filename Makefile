@@ -13,6 +13,8 @@ pack:
 	   do echo $$i; cat $$i; echo ---- ; done ;\
   echo evaluation-prompt.md; echo -----; \
   cat prompts/evaluation-prompt.md ; \
+  echo evaluation-prompt-gt.md; echo -----; \
+  cat prompts/evaluation-prompt-gt.md ; \
 	echo Source files; echo -----; \
 	cat src/failter/*.clj ; cat test/failter/*.clj) >~/failter-pack.txt
 

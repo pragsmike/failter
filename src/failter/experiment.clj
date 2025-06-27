@@ -1,13 +1,15 @@
 (ns failter.experiment
-  (:require [clojure.string :as str]
-            [clojure.java.io :as io]
+  (:require [clojure.java.io :as io]
             [clojure.pprint :as pprint]
             [failter.exp-paths :as exp-paths]
+            [failter.trial :as trial]
             [failter.util :as util]))
 
-(defn print-trial-details [params]
+(defn print-trial-details
+  "Prints the details of a Trial record during a dry run."
+  [^failter.trial.Trial trial]
   (println "--- Queued Trial (Dry Run) ---")
-  (pprint/pprint params)
+  (pprint/pprint trial)
   (println "------------------------------\n"))
 
 (defn conduct-experiment [experiment-dir trial-fn]
@@ -22,16 +24,12 @@
       (doseq [input-path    inputs
               template-path templates
               model-name    models]
-        (let [output-path  (exp-paths/output-path-for-trial experiment-dir model-name template-path input-path)
-              output-file  (io/file output-path)
-              trial-params {:model-name    model-name
-                            :template-path template-path
-                            :input-path    input-path
-                            :output-path   output-path}]
+        (let [trial (trial/new-trial experiment-dir model-name template-path input-path)
+              output-file  (io/file (:output-path trial))]
           (if (.exists output-file)
-            (println (str "Skipping existing trial: " output-path))
+            (println (str "Skipping existing trial: " (:output-path trial)))
             (try
-              (trial-fn trial-params)
+              (trial-fn trial)
               (catch Exception e
                 (println (str "\nERROR: Trial failed for input '" (.getName (io/file input-path))
                               "' with model '" model-name "'"))

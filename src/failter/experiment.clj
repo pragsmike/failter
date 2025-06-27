@@ -2,14 +2,8 @@
   (:require [clojure.string :as str]
             [clojure.java.io :as io]
             [clojure.pprint :as pprint]
-            [failter.exp-paths :as exp-paths]))
-
-(defn- list-file-paths [dir]
-  (->> (.listFiles dir) (filter #(.isFile %)) (map #(.getPath %))))
-
-(defn- read-model-names [file-path]
-  (with-open [rdr (io/reader file-path)]
-    (->> (line-seq rdr) (map str/trim) (remove str/blank?) (doall))))
+            [failter.exp-paths :as exp-paths]
+            [failter.util :as util]))
 
 (defn print-trial-details [params]
   (println "--- Queued Trial (Dry Run) ---")
@@ -18,9 +12,9 @@
 
 (defn conduct-experiment [experiment-dir trial-fn]
   (try
-    (let [inputs        (list-file-paths (exp-paths/inputs-dir experiment-dir))
-          templates     (list-file-paths (exp-paths/templates-dir experiment-dir))
-          models        (read-model-names (exp-paths/models-file experiment-dir))
+    (let [inputs        (util/list-file-paths (exp-paths/inputs-dir experiment-dir))
+          templates     (util/list-file-paths (exp-paths/templates-dir experiment-dir))
+          models        (util/read-model-names (exp-paths/models-file experiment-dir))
           total-trials  (* (count inputs) (count templates) (count models))]
       (println (str "Starting experiment in: " experiment-dir))
       (println (str "Found " (count inputs) " inputs, " (count templates) " templates, " (count models) " models."))

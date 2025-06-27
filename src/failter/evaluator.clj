@@ -4,7 +4,7 @@
             [failter.frontmatter :as fm]
             [failter.llm-interface :as llm]
             [failter.exp-paths :as exp-paths]
-            [clj-yaml.core :as yaml]))
+            [failter.util :as util]))
 
 (def evaluator-config
   {:default-judge-model "openai/gpt-4o"
@@ -85,12 +85,9 @@
         (if (:error eval-response)
           (println (str "ERROR: Judge LLM failed for " output-path "\n" (:error eval-response)))
           (let [eval-content (:content eval-response)
-                yaml-regex #"(?s)```yaml\s*(.+?)\s*```"
-                yaml-str (or (second (re-find yaml-regex eval-content)) eval-content)
-                parsed-yaml (yaml/parse-string yaml-str :keywords false)
-                final-yaml (assoc parsed-yaml "evaluation-method" eval-method)
-                  ;; --- THE CORRECTED API CALL ---
-                final-content (yaml/generate-string final-yaml :dumper-options {:flow-style :block})]
+                yaml-str (util/parse-yaml-block eval-content)
+                method-str (str "evaluation-method: " eval-method)
+                final-content (str yaml-str "\n" method-str "\n")]
             (spit eval-file-path final-content)
             (println (str "  Writing evaluation to: " eval-file-path))))))
     (catch Exception e

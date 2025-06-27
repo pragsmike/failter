@@ -4,7 +4,8 @@
             [failter.frontmatter :as fm]
             [clojure.string :as str]
             [clojure-csv.core :as csv]
-            [failter.exp-paths :as exp-paths]))
+            [failter.exp-paths :as exp-paths]
+            [failter.util :as util]))
 
 (def grade-scores {"A" 5 "B" 4 "C" 3 "D" 2 "F" 1})
 
@@ -16,7 +17,13 @@
       (cond
         (.exists eval-file)
         (let [eval-content (slurp eval-file)
-              eval-meta (yaml/parse-string eval-content :keywords true)]
+              ;; --- ROBUST REGEX-BASED PARSING ---
+              grade (second (re-find #"(?m)^grade:\s*([A-DF])" eval-content))
+              method (second (re-find #"(?m)^evaluation-method:\s*(\S+)" eval-content))
+              rationale (second (re-find #"(?ms)^rationale:\s*(.*)" eval-content))
+              eval-meta {:grade grade
+                         :rationale (str/trim rationale)
+                         :evaluation-method method}]
           (merge output-meta eval-meta))
         (:error output-meta)
         (assoc output-meta :grade "F" :rationale (:error output-meta) :evaluation-method "failed")
@@ -40,7 +47,7 @@
        :avg-time-s (if (seq times) (/ (double (apply + times)) 1000 (count times)) 0.0)
        :avg-cost (if (and (seq costs) (every? some? costs)) (/ (double (apply + costs)) (count costs)) 0.0)
        :grade-dist (frequencies grades)
-       :eval-methods methods}))) ; Added new key
+       :eval-methods methods})))
 
 (defn- prepare-summary-for-display
   [{:keys [model template avg-score avg-time-s avg-cost trials errors grade-dist eval-methods]}]
@@ -52,7 +59,7 @@
    :trials (str trials)
    :errors (str errors)
    :grade-dist (pr-str (into (sorted-map-by #(compare %2 %1)) grade-dist))
-   :eval-methods (str/join ", " (for [[k v] eval-methods] (str v " " k)))}) ; Format methods
+   :eval-methods (str/join ", " (for [[k v] eval-methods] (str v " " k)))})
 
 (defn- format-as-table [display-summaries]
   (let [header (str/join " | "

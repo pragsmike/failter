@@ -6,7 +6,7 @@
 
 (def grade-scores {"A" 5 "B" 4 "C" 3 "D" 2 "F" 1})
 
-(defn- calculate-summary [evals]
+(defn calculate-summary [evals]
   (let [first-eval (first evals)
         first-trial (:trial first-eval)
         grades (keep :grade evals)

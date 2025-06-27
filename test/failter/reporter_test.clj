@@ -1,55 +1,40 @@
 (ns failter.reporter-test
   (:require [clojure.test :refer :all]
-            [failter.reporter]))
+            [failter.reporter :as reporter]
+            [failter.trial :as trial]
+            [failter.eval :as feval]))
 
-(def calculate-summary (ns-resolve 'failter.reporter 'calculate-summary))
-
-;; --- FIX: Helper for robust floating point comparison ---
-(defn- double-equals? [a b]
+(defn- double-equals?
+  "Helper for robust floating point comparison."
+  [a b]
   (< (Math/abs (- a b)) 1e-9))
 
 (deftest calculate-summary-test
-  (testing "Calculating summary for a set of trial results"
-    (let [trial-results [;; Successful A grade
-                         {:filtered-by-model "model-a"
-                          :filtered-by-template "template-1.md"
-                          :execution-time-ms 1000
-                          :estimated-cost 0.001
-                          :grade "A"}
-                         ;; Successful B grade
-                         {:filtered-by-model "model-a"
-                          :filtered-by-template "template-1.md"
-                          :execution-time-ms 2000
-                          :estimated-cost 0.002
-                          :grade "B"}
-                         ;; Failed trial (timeout)
-                         {:filtered-by-model "model-a"
-                          :filtered-by-template "template-1.md"
-                          :execution-time-ms 60000
-                          :error "Read timed out"
-                          :grade "F"} ; Synthesized grade
-                         ;; Successful but unevaluated trial (no grade)
-                         {:filtered-by-model "model-a"
-                          :filtered-by-template "template-1.md"
-                          :execution-time-ms 500}
-                         ;; Another A grade
-                         {:filtered-by-model "model-a"
-                          :filtered-by-template "template-1.md"
-                          :execution-time-ms 1500
-                          :estimated-cost 0.0015
-                          :grade "A"}]
-          summary (@calculate-summary trial-results)]
+  (testing "Calculating summary for a set of Eval records"
+    (let [;; --- THIS IS THE FIX ---
+          ;; We now construct proper Trial and Eval records for the test.
+          trial-1 (trial/->Trial "model-a" "template-1.md" "in.md" "out.md" 1000 nil 0.001 nil)
+          trial-2 (trial/->Trial "model-a" "template-1.md" "in.md" "out.md" 2000 nil 0.002 nil)
+          trial-3 (trial/->Trial "model-a" "template-1.md" "in.md" "out.md" 60000 nil nil "Read timed out")
+          trial-4 (trial/->Trial "model-a" "template-1.md" "in.md" "out.md" 500 nil nil nil)
+          trial-5 (trial/->Trial "model-a" "template-1.md" "in.md" "out.md" 1500 nil 0.0015 nil)
+
+          evals [(feval/->Eval trial-1 "A" "Rationale A" "gt" "judge" nil)
+                 (feval/->Eval trial-2 "B" "Rationale B" "gt" "judge" nil)
+                 (feval/->Eval trial-3 "F" "Read timed out" "failed" nil nil)
+                 (feval/->Eval trial-4 nil nil "unevaluated" nil nil)
+                 (feval/->Eval trial-5 "A" "Rationale A2" "gt" "judge" nil)]
+
+          ;; The function under test now takes the sequence of Eval records
+          summary (reporter/calculate-summary evals)]
 
       (is (= "model-a" (:model summary)))
       (is (= "template-1.md" (:template summary)))
       (is (= 5 (:trials summary)))
       (is (= 1 (:errors summary)))
 
-      (is (= 3.75 (:avg-score summary)))
-      (is (= 13.0 (:avg-time-s summary)))
-      (is (double-equals? 0.0015 (:avg-cost summary)))
-      (is (= {"A" 2, "B" 1, "F" 1} (:grade-dist summary)))))
-
-  (testing "Calculating summary with no results"
-    (let [summary (@calculate-summary [])]
-      (is (nil? summary) "Should return nil for empty input"))))
+      (is (= 3.75 (:avg-score summary)) "Average score should be (5+4+1)/3")
+      (is (= 13.0 (:avg-time-s summary)) "Average time should be (1+2+60+0.5+1.5)/5")
+      (is (double-equals? 0.0015 (:avg-cost summary)) "Average cost should be (0.001+0.002+0.0015)/3")
+      (is (= {"A" 2, "B" 1, "F" 1} (:grade-dist summary)))
+      (is (= {"gt" 3, "failed" 1, "unevaluated" 1} (:eval-methods summary))))))

@@ -39,26 +39,45 @@
 
             :else
             (let [input-path (exp-paths/input-path-for-result experiment-dir output-path)
-                  template-path (exp-paths/template-path-for-result experiment-dir metadata)]
-              {:valid? true
-               :output-path output-path
-               :output-content (:body output-content)
-               :input-path input-path
-               :input-content (:body (fm/parse-file-content (slurp input-path)))
-               :template-path template-path
-               :template-content (slurp template-path)})))
+                  template-path (exp-paths/template-path-for-result experiment-dir metadata)
+                  gt-path-str (exp-paths/ground-truth-path-for-input experiment-dir input-path)
+                  gt-file (io/file gt-path-str)]
+              (merge
+               {:valid? true
+                :output-path output-path
+                :output-content (:body output-content)
+                :input-path input-path
+                :input-content (:body (fm/parse-file-content (slurp input-path)))
+                :template-path template-path
+                :template-content (slurp template-path)}
+               (if (.exists gt-file)
+                 {:has-ground-truth? true
+                  :ground-truth-content (:body (fm/parse-file-content (slurp gt-file)))}
+                 {:has-ground-truth? false
+                  :ground-truth-content nil})))))
         (catch Exception e
           {:valid? false :reason (str "file read error: " (.getMessage e)) :output-path output-path})))))
 
 (defn- build-judge-prompt
-  "Constructs the final prompt string for the judge LLM."
-  [{:keys [input-content template-content output-content]}]
-  (let [prompt-path (get-in evaluator-config [:prompts :standard])
-        eval-prompt-template (slurp prompt-path)]
-    (-> eval-prompt-template
-        (str/replace "{{ORIGINAL_INPUT}}" input-content)
-        (str/replace "{{PROMPT_TEMPLATE}}" template-content)
-        (str/replace "{{GENERATED_OUTPUT}}" output-content))))
+  "Constructs the final prompt string for the judge LLM, using a ground-truth
+  prompt if ground-truth data is available in the context."
+  [{:keys [has-ground-truth? ground-truth-content input-content template-content output-content]}]
+  (if has-ground-truth?
+    ;; --- Path A: Ground Truth evaluation ---
+    (let [prompt-path (get-in evaluator-config [:prompts :ground-truth])
+          eval-prompt-template (slurp prompt-path)]
+      (-> eval-prompt-template
+          (str/replace "{{ORIGINAL_INPUT}}" input-content)
+          (str/replace "{{PROMPT_TEMPLATE}}" template-content)
+          (str/replace "{{GROUND_TRUTH_EXAMPLE}}" ground-truth-content)
+          (str/replace "{{GENERATED_OUTPUT}}" output-content)))
+    ;; --- Path B: Standard evaluation ---
+    (let [prompt-path (get-in evaluator-config [:prompts :standard])
+          eval-prompt-template (slurp prompt-path)]
+      (-> eval-prompt-template
+          (str/replace "{{ORIGINAL_INPUT}}" input-content)
+          (str/replace "{{PROMPT_TEMPLATE}}" template-content)
+          (str/replace "{{GENERATED_OUTPUT}}" output-content)))))
 
 (defn- execute-evaluation!
   "Executes the evaluation for a single context. This function has side-effects."
@@ -67,8 +86,9 @@
     (let [final-prompt (build-judge-prompt context)
           output-path (:output-path context)
           eval-file-path (exp-paths/eval-path output-path)]
-      (println "--- Evaluating Trial Output ---")
+      (println (str "--- Evaluating Trial Output" (if (:has-ground-truth? context) " (with Ground Truth)" "") " ---"))
       (println (str "  Judge Model: " judge-model "  Output File: " output-path))
+
       (let [eval-response (llm/call-model judge-model final-prompt :timeout 600000)]
         (if (:error eval-response)
           (println (str "ERROR: Judge LLM failed for " output-path "\n" (:error eval-response)))
@@ -87,7 +107,6 @@
 
 (defn run-evaluation
   [experiment-dir & {:keys [judge-model] :or {judge-model (:default-judge-model evaluator-config)}}]
-
   (println (str "Starting evaluation for experiment in: " experiment-dir " using judge: " judge-model))
   (->> (find-all-trial-outputs experiment-dir)
        (map #(build-evaluation-context experiment-dir %))

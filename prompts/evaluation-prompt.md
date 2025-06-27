@@ -32,12 +32,9 @@ rationale: [A concise, one-to-three sentence explanation for your grade. Be spec
 ```
 
 ## Context for Evaluation
-
 ORIGINAL_INPUT:
 {{ORIGINAL_INPUT}}
-
 PROMPT_TEMPLATE:
 {{PROMPT_TEMPLATE}}
-
 GENERATED_OUTPUT:
 {{GENERATED_OUTPUT}}

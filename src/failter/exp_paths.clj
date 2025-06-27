@@ -12,6 +12,7 @@
 (defn inputs-dir [exp-dir] (io/file exp-dir "inputs"))
 (defn templates-dir [exp-dir] (io/file exp-dir "templates"))
 (defn results-dir [exp-dir] (io/file exp-dir "results"))
+(defn ground-truth-dir [exp-dir] (io/file exp-dir "ground_truth")) ; New
 (defn models-file [exp-dir] (io/file exp-dir "model-names.txt"))
 (defn report-md-path [exp-dir] (.getPath (io/file exp-dir "report.md")))
 (defn report-csv-path [exp-dir] (.getPath (io/file exp-dir "report.csv")))
@@ -39,6 +40,12 @@
   [exp-dir result-metadata]
   (let [template-filename (:filtered-by-template result-metadata)]
     (.getPath (io/file (templates-dir exp-dir) template-filename))))
+
+(defn ground-truth-path-for-input
+  "Constructs the expected path for a ground truth file corresponding to an input file."
+  [exp-dir input-path]
+  (let [input-filename (.getName (io/file input-path))]
+    (.getPath (io/file (ground-truth-dir exp-dir) input-filename))))
 
 ;; --- Sibling Artifact Paths ---
 

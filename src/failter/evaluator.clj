@@ -2,93 +2,86 @@
   (:require [clojure.string :as str]
             [clojure.java.io :as io]
             [failter.config :as config]
+            [failter.eval :as feval]
+            [failter.exp-paths :as exp-paths]
             [failter.frontmatter :as fm]
             [failter.llm-interface :as llm]
-            [failter.exp-paths :as exp-paths]
+            [failter.trial :as trial]
             [failter.util :as util]))
 
-(defn- build-evaluation-context
-  [experiment-dir output-file]
-  (let [output-path (.getPath output-file)
-        eval-file   (io/file (exp-paths/eval-path output-path))]
-    (if (.exists eval-file)
-      {:valid? false :reason "already evaluated" :output-path output-path}
-      (try
-        (let [output-content (fm/parse-file-content (slurp output-file))
-              metadata (:frontmatter output-content)]
-          (cond
-            (:error metadata)
-            {:valid? false :reason "runner failed" :output-path output-path}
-            (not (:filtered-by-template metadata))
-            {:valid? false :reason "missing metadata" :output-path output-path}
-            :else
-            (let [input-path (exp-paths/input-path-for-result experiment-dir output-path)
-                  template-path (exp-paths/template-path-for-result experiment-dir metadata)
-                  gt-path-str (exp-paths/ground-truth-path-for-input experiment-dir input-path)
-                  gt-file (io/file gt-path-str)]
-              (merge
-               {:valid? true
-                :output-path output-path
-                :output-content (:body output-content)
-                :input-path input-path
-                :input-content (:body (fm/parse-file-content (slurp input-path)))
-                :template-path template-path
-                :template-content (slurp template-path)}
-               (if (.exists gt-file)
-                 {:has-ground-truth? true
-                  :ground-truth-content (:body (fm/parse-file-content (slurp gt-file)))}
-                 {:has-ground-truth? false
-                  :ground-truth-content nil})))))
-        (catch Exception e
-          {:valid? false :reason (str "file read error: " (.getMessage e)) :output-path output-path})))))
-
 (defn- build-judge-prompt
+  "Constructs the final prompt string for the judge LLM."
   [{:keys [has-ground-truth? ground-truth-content input-content template-content output-content]}]
-  (let [prompt-key (if has-ground-truth? :ground-truth :standard)
-        prompt-path (get-in config/config [:evaluator :prompts prompt-key])
-        eval-prompt-template (slurp prompt-path)]
-    (if has-ground-truth?
+  (if has-ground-truth?
+    (let [prompt-key (if has-ground-truth? :ground-truth :standard)
+          prompt-path (get-in config/config [:evaluator :prompts prompt-key])
+          eval-prompt-template (slurp prompt-path)]
       (-> eval-prompt-template
           (str/replace "{{ORIGINAL_INPUT}}" input-content)
           (str/replace "{{PROMPT_TEMPLATE}}" template-content)
           (str/replace "{{GROUND_TRUTH_EXAMPLE}}" ground-truth-content)
-          (str/replace "{{GENERATED_OUTPUT}}" output-content))
+          (str/replace "{{GENERATED_OUTPUT}}" output-content)))
+    (let [prompt-key :standard
+          prompt-path (get-in config/config [:evaluator :prompts prompt-key])
+          eval-prompt-template (slurp prompt-path)]
       (-> eval-prompt-template
           (str/replace "{{ORIGINAL_INPUT}}" input-content)
           (str/replace "{{PROMPT_TEMPLATE}}" template-content)
           (str/replace "{{GENERATED_OUTPUT}}" output-content)))))
 
-(defn- execute-evaluation!
-  [judge-model context]
-  (try
-    (let [final-prompt (build-judge-prompt context)
-          output-path (:output-path context)
-          eval-file-path (exp-paths/eval-path output-path)
-          eval-method (if (:has-ground-truth? context) "ground-truth" "rules-based")]
-      (println (str "--- Evaluating Trial Output (" eval-method ") ---"))
-      (println (str "  Judge Model: " judge-model "  Output File: " output-path))
-      (let [eval-response (llm/call-model judge-model final-prompt :timeout 600000)]
-        (if (:error eval-response)
-          (println (str "ERROR: Judge LLM failed for " output-path "\n" (:error eval-response)))
-          (let [eval-content (:content eval-response)
-                yaml-str (util/parse-yaml-block eval-content)
-                method-str (str "evaluation-method: " eval-method)
-                final-content (str yaml-str "\n" method-str "\n")]
-            (spit eval-file-path final-content)
-            (println (str "  Writing evaluation to: " eval-file-path))))))
-    (catch Exception e
-      (println (str "ERROR: An unexpected error occurred during evaluation of " (:output-path context) ": " (.getMessage e))))))
+(defn- build-evaluation-context
+  "Builds the context map needed for evaluation, including all file contents."
+  [experiment-dir ^failter.trial.Trial trial]
+  (let [output-path (:output-path trial)
+        eval-file   (io/file (exp-paths/eval-path output-path))]
+    (if (.exists eval-file)
+      {:valid? false :reason "already evaluated"}
+      (let [input-path    (exp-paths/input-path-for-result experiment-dir output-path)
+            ;; --- THIS IS THE FIX ---
+            ;; The trial record only has the template's filename.
+            ;; We must construct the full path before trying to read it.
+            template-filename (:template-path trial)
+            full-template-path (.getPath (io/file (exp-paths/templates-dir experiment-dir) template-filename))
+            gt-path-str   (exp-paths/ground-truth-path-for-input experiment-dir input-path)
+            gt-file       (io/file gt-path-str)]
+        (merge
+         {:valid? true
+          :trial trial
+          :input-content (:body (fm/parse-file-content (slurp input-path)))
+          :output-content (:body (fm/parse-file-content (slurp output-path)))
+          :template-content (slurp full-template-path)} ;; Slurp the corrected full path
+         (if (.exists gt-file)
+           {:has-ground-truth? true
+            :ground-truth-content (:body (fm/parse-file-content (slurp gt-file)))}
+           {:has-ground-truth? false}))))))
 
-(defn- run-evaluations-for-contexts
-  [judge-model contexts]
-  (doseq [context contexts]
-    (if (:valid? context)
-      (execute-evaluation! judge-model context)
-      (println (str "Skipping (" (:reason context) "): " (:output-path context))))))
+(defn- execute-evaluation!
+  "Calls the judge LLM and writes the resulting Eval record to disk."
+  [judge-model context]
+  (let [final-prompt (build-judge-prompt context)
+        eval-method (if (:has-ground-truth? context) "ground-truth" "rules-based")
+        trial-output-path (-> context :trial :output-path)]
+    (println (str "--- Evaluating Trial Output (" eval-method ") ---"))
+    (println (str "  Judge Model: " judge-model "  Output File: " trial-output-path))
+    (let [eval-response (llm/call-model judge-model final-prompt :timeout 600000)]
+      (if-let [err (:error eval-response)]
+        (println (str "ERROR: Judge LLM failed for " trial-output-path "\n" err))
+        (let [llm-output (util/parse-yaml-block (:content eval-response))
+              grade (second (re-find #"(?m)grade:\s*([A-DF])" llm-output))
+              rationale (second (re-find #"(?ms)rationale:\s*(.*)" llm-output))
+              eval-record (feval/->Eval (:trial context) grade (str/trim rationale) eval-method judge-model nil)]
+          (feval/write-eval eval-record)
+          (println (str "  Writing evaluation to: " (exp-paths/eval-path trial-output-path))))))))
 
 (defn run-evaluation
+  "Main entry point for the evaluation process."
   [experiment-dir & {:keys [judge-model] :or {judge-model (get-in config/config [:evaluator :default-judge-model])}}]
   (println (str "Starting evaluation for experiment in: " experiment-dir " using judge: " judge-model))
-  (->> (exp-paths/find-all-result-files experiment-dir)
-       (map #(build-evaluation-context experiment-dir %))
-       (run-evaluations-for-contexts judge-model)))
+  (let [result-files (exp-paths/find-all-result-files experiment-dir)]
+    (doseq [file result-files]
+      (let [trial (trial/from-file file)]
+        (if (:error trial)
+          (println (str "Skipping (runner failed): " (:output-path trial)))
+          (let [context (build-evaluation-context experiment-dir trial)]
+            (when (:valid? context)
+              (execute-evaluation! judge-model context))))))))

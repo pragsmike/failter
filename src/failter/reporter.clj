@@ -1,57 +1,29 @@
 (ns failter.reporter
-  (:require [clojure.java.io :as io]
-            [clojure.string :as str]
+  (:require [clojure.string :as str]
             [clojure-csv.core :as csv]
-            [failter.exp-paths :as exp-paths]
-            [failter.frontmatter :as fm]
-            [failter.util :as util]))
+            [failter.eval :as feval]
+            [failter.exp-paths :as exp-paths]))
 
 (def grade-scores {"A" 5 "B" 4 "C" 3 "D" 2 "F" 1})
 
-(defn- get-trial-result
-  [output-file]
-  (try
-    (let [output-meta (:frontmatter (fm/parse-file-content (slurp output-file)))
-          eval-file   (io/file (exp-paths/eval-path (.getPath output-file)))]
-      (cond
-        (.exists eval-file)
-        (let [raw-eval-content (slurp eval-file)
-              ;; First, use the utility to strip any potential markdown fence.
-              clean-eval-content (util/parse-yaml-block raw-eval-content)
-
-              ;; Then, run the robust regex parsers on the clean content.
-              grade (second (re-find #"(?m)^grade:\s*([A-DF])" clean-eval-content))
-              method (second (re-find #"(?m)^evaluation-method:\s*(\S+)" clean-eval-content))
-              rationale (second (re-find #"(?ms)^rationale:\s*(.*)" clean-eval-content))
-              eval-meta {:grade grade
-                         :rationale (str/trim rationale)
-                         :evaluation-method method}]
-          (merge output-meta eval-meta))
-
-        (:error output-meta)
-        (assoc output-meta :grade "F" :rationale (:error output-meta) :evaluation-method "failed")
-
-        :else
-        (assoc output-meta :evaluation-method "unevaluated")))
-    (catch Exception e nil)))
-
-(defn- calculate-summary [results]
-  (when-let [first-result (first results)]
-    (let [grades (keep :grade results)
-          scores (keep grade-scores grades)
-          times  (keep :execution-time-ms results)
-          costs  (keep :estimated-cost results)
-          errors (filter :error results)
-          methods (frequencies (keep :evaluation-method results))]
-      {:model (:filtered-by-model first-result)
-       :template (:filtered-by-template first-result)
-       :trials (count results)
-       :errors (count errors)
-       :avg-score (if (seq scores) (/ (double (apply + scores)) (count scores)) 0.0)
-       :avg-time-s (if (seq times) (/ (double (apply + times)) 1000 (count times)) 0.0)
-       :avg-cost (if (and (seq costs) (every? some? costs)) (/ (double (apply + costs)) (count costs)) 0.0)
-       :grade-dist (frequencies grades)
-       :eval-methods methods})))
+(defn- calculate-summary [evals]
+  (let [first-eval (first evals)
+        first-trial (:trial first-eval)
+        grades (keep :grade evals)
+        scores (keep grade-scores grades)
+        times  (keep #(:execution-time-ms (:trial %)) evals)
+        costs  (keep #(:estimated-cost (:trial %)) evals)
+        errors (filter #(-> % :trial :error) evals)
+        methods (frequencies (keep :method evals))]
+    {:model (:model-name first-trial)
+     :template (.getName (clojure.java.io/file (:template-path first-trial)))
+     :trials (count evals)
+     :errors (count errors)
+     :avg-score (if (seq scores) (/ (double (apply + scores)) (count scores)) 0.0)
+     :avg-time-s (if (seq times) (/ (double (apply + times)) 1000 (count times)) 0.0)
+     :avg-cost (if (and (seq costs) (every? some? costs)) (/ (double (apply + costs)) (count costs)) 0.0)
+     :grade-dist (frequencies grades)
+     :eval-methods methods}))
 
 (defn- prepare-summary-for-display
   [{:keys [model template avg-score avg-time-s avg-cost trials errors grade-dist eval-methods]}]
@@ -99,17 +71,15 @@
 
 (defn generate-report [experiment-dir]
   (println (str "Generating report for experiment: " experiment-dir))
-  (let [output-files (exp-paths/find-all-result-files experiment-dir)
-        summaries (->> output-files
-                       (map get-trial-result)
-                       (remove nil?)
-                       (group-by (juxt :filtered-by-model :filtered-by-template))
+  (let [evals (feval/read-all-evals experiment-dir)
+        combo-key (fn [e] [(-> e :trial :model-name) (-> e :trial :template-path)])
+        summaries (->> evals
+                       (group-by combo-key)
                        (vals)
                        (map calculate-summary)
                        (remove nil?)
                        (sort-by :avg-score)
                        (reverse))
-
         display-summaries (map prepare-summary-for-display summaries)
         table-string (format-as-table display-summaries)
         csv-string   (format-as-csv display-summaries)

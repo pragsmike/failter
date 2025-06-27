@@ -3,8 +3,7 @@
             [clojure.java.io :as io]
             [failter.frontmatter :as fm]
             [failter.llm-interface :as llm]
-            [failter.exp-paths :as exp-paths]
-            [clj-yaml.core :as yaml])) ; Added yaml require
+            [failter.exp-paths :as exp-paths]))
 
 (def evaluator-config
   {:default-judge-model "openai/gpt-4o"
@@ -68,8 +67,8 @@
     (let [prompt-path (get-in evaluator-config [:prompts :standard])
           eval-prompt-template (slurp prompt-path)]
       (-> eval-prompt-template
-          (str/replace "{{ORIGINAL_INPUT}}" input-content)
           (str/replace "{{PROMPT_TEMPLATE}}" template-content)
+          (str/replace "{{ORIGINAL_INPUT}}" input-content)
           (str/replace "{{GENERATED_OUTPUT}}" output-content)))))
 
 (defn- execute-evaluation!
@@ -87,13 +86,13 @@
         (if (:error eval-response)
           (println (str "ERROR: Judge LLM failed for " output-path "\n" (:error eval-response)))
           (do
-            ;; --- THIS IS THE NEW LOGIC ---
+            ;; --- THIS IS THE ROBUST STRING-BASED FIX ---
             (let [eval-content (:content eval-response)
                   yaml-regex #"(?s)```yaml\s*(.+?)\s*```"
-                  yaml-str (or (second (re-find yaml-regex eval-content)) eval-content)
-                  parsed-yaml (yaml/parse-string yaml-str)
-                  final-yaml (assoc parsed-yaml :evaluation-method eval-method)
-                  final-content (yaml/generate-string final-yaml :flow-style :block)]
+                  yaml-str (-> (or (second (re-find yaml-regex eval-content)) eval-content)
+                               str/trim)
+                  method-str (str "evaluation-method: " eval-method)
+                  final-content (str yaml-str "\n" method-str "\n")]
               (spit eval-file-path final-content)
               (println (str "  Writing evaluation to: " eval-file-path)))))))
     (catch Exception e

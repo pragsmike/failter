@@ -3,7 +3,8 @@
             [clojure.java.io :as io]
             [failter.frontmatter :as fm]
             [failter.llm-interface :as llm]
-            [failter.exp-paths :as exp-paths]))
+            [failter.exp-paths :as exp-paths]
+            [clj-yaml.core :as yaml])) ; Added yaml require
 
 (def evaluator-config
   {:default-judge-model "openai/gpt-4o"
@@ -11,7 +12,6 @@
              :ground-truth "prompts/evaluation-prompt-gt.md"}})
 
 (defn- find-all-trial-outputs
-  "Finds all primary .md output files within an experiment's results directory."
   [experiment-dir]
   (let [results-root (exp-paths/results-dir experiment-dir)]
     (when (.exists results-root)
@@ -21,7 +21,6 @@
                          (str/ends-with? (.getName %) ".md")))))))
 
 (defn- build-evaluation-context
-  "Gathers all file paths, content, and metadata needed for one evaluation."
   [experiment-dir output-file]
   (let [output-path (.getPath output-file)
         eval-file   (io/file (exp-paths/eval-path output-path))]
@@ -33,10 +32,8 @@
           (cond
             (:error metadata)
             {:valid? false :reason "runner failed" :output-path output-path}
-
             (not (:filtered-by-template metadata))
             {:valid? false :reason "missing metadata" :output-path output-path}
-
             :else
             (let [input-path (exp-paths/input-path-for-result experiment-dir output-path)
                   template-path (exp-paths/template-path-for-result experiment-dir metadata)
@@ -59,11 +56,8 @@
           {:valid? false :reason (str "file read error: " (.getMessage e)) :output-path output-path})))))
 
 (defn- build-judge-prompt
-  "Constructs the final prompt string for the judge LLM, using a ground-truth
-  prompt if ground-truth data is available in the context."
   [{:keys [has-ground-truth? ground-truth-content input-content template-content output-content]}]
   (if has-ground-truth?
-    ;; --- Path A: Ground Truth evaluation ---
     (let [prompt-path (get-in evaluator-config [:prompts :ground-truth])
           eval-prompt-template (slurp prompt-path)]
       (-> eval-prompt-template
@@ -71,7 +65,6 @@
           (str/replace "{{PROMPT_TEMPLATE}}" template-content)
           (str/replace "{{GROUND_TRUTH_EXAMPLE}}" ground-truth-content)
           (str/replace "{{GENERATED_OUTPUT}}" output-content)))
-    ;; --- Path B: Standard evaluation ---
     (let [prompt-path (get-in evaluator-config [:prompts :standard])
           eval-prompt-template (slurp prompt-path)]
       (-> eval-prompt-template
@@ -80,21 +73,29 @@
           (str/replace "{{GENERATED_OUTPUT}}" output-content)))))
 
 (defn- execute-evaluation!
-  "Executes the evaluation for a single context. This function has side-effects."
+  "Executes the evaluation and writes the .eval file with evaluation method metadata."
   [judge-model context]
   (try
     (let [final-prompt (build-judge-prompt context)
           output-path (:output-path context)
-          eval-file-path (exp-paths/eval-path output-path)]
-      (println (str "--- Evaluating Trial Output" (if (:has-ground-truth? context) " (with Ground Truth)" "") " ---"))
+          eval-file-path (exp-paths/eval-path output-path)
+          eval-method (if (:has-ground-truth? context) "ground-truth" "rules-based")]
+      (println (str "--- Evaluating Trial Output (" eval-method ") ---"))
       (println (str "  Judge Model: " judge-model "  Output File: " output-path))
 
       (let [eval-response (llm/call-model judge-model final-prompt :timeout 600000)]
         (if (:error eval-response)
           (println (str "ERROR: Judge LLM failed for " output-path "\n" (:error eval-response)))
           (do
-            (spit eval-file-path (:content eval-response))
-            (println (str "  Writing evaluation to: " eval-file-path))))))
+            ;; --- THIS IS THE NEW LOGIC ---
+            (let [eval-content (:content eval-response)
+                  yaml-regex #"(?s)```yaml\s*(.+?)\s*```"
+                  yaml-str (or (second (re-find yaml-regex eval-content)) eval-content)
+                  parsed-yaml (yaml/parse-string yaml-str)
+                  final-yaml (assoc parsed-yaml :evaluation-method eval-method)
+                  final-content (yaml/generate-string final-yaml :flow-style :block)]
+              (spit eval-file-path final-content)
+              (println (str "  Writing evaluation to: " eval-file-path)))))))
     (catch Exception e
       (println (str "ERROR: An unexpected error occurred during evaluation of " (:output-path context) ": " (.getMessage e))))))
 

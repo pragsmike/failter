@@ -1,10 +1,9 @@
 (ns failter.reporter
   (:require [clojure.java.io :as io]
-            [clj-yaml.core :as yaml]
-            [failter.frontmatter :as fm]
             [clojure.string :as str]
             [clojure-csv.core :as csv]
             [failter.exp-paths :as exp-paths]
+            [failter.frontmatter :as fm]
             [failter.util :as util]))
 
 (def grade-scores {"A" 5 "B" 4 "C" 3 "D" 2 "F" 1})
@@ -16,17 +15,22 @@
           eval-file   (io/file (exp-paths/eval-path (.getPath output-file)))]
       (cond
         (.exists eval-file)
-        (let [eval-content (slurp eval-file)
-              ;; --- ROBUST REGEX-BASED PARSING ---
-              grade (second (re-find #"(?m)^grade:\s*([A-DF])" eval-content))
-              method (second (re-find #"(?m)^evaluation-method:\s*(\S+)" eval-content))
-              rationale (second (re-find #"(?ms)^rationale:\s*(.*)" eval-content))
+        (let [raw-eval-content (slurp eval-file)
+              ;; First, use the utility to strip any potential markdown fence.
+              clean-eval-content (util/parse-yaml-block raw-eval-content)
+
+              ;; Then, run the robust regex parsers on the clean content.
+              grade (second (re-find #"(?m)^grade:\s*([A-DF])" clean-eval-content))
+              method (second (re-find #"(?m)^evaluation-method:\s*(\S+)" clean-eval-content))
+              rationale (second (re-find #"(?ms)^rationale:\s*(.*)" clean-eval-content))
               eval-meta {:grade grade
                          :rationale (str/trim rationale)
                          :evaluation-method method}]
           (merge output-meta eval-meta))
+
         (:error output-meta)
         (assoc output-meta :grade "F" :rationale (:error output-meta) :evaluation-method "failed")
+
         :else
         (assoc output-meta :evaluation-method "unevaluated")))
     (catch Exception e nil)))
@@ -95,11 +99,7 @@
 
 (defn generate-report [experiment-dir]
   (println (str "Generating report for experiment: " experiment-dir))
-  (let [results-root (exp-paths/results-dir experiment-dir)
-        output-files (when (.exists results-root)
-                       (->> results-root
-                            (file-seq)
-                            (filter #(and (.isFile %) (str/ends-with? (.getName %) ".md")))))
+  (let [output-files (exp-paths/find-all-result-files experiment-dir)
         summaries (->> output-files
                        (map get-trial-result)
                        (remove nil?)

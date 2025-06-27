@@ -11,15 +11,6 @@
    :prompts {:standard "prompts/evaluation-prompt.md"
              :ground-truth "prompts/evaluation-prompt-gt.md"}})
 
-(defn- find-all-trial-outputs
-  [experiment-dir]
-  (let [results-root (exp-paths/results-dir experiment-dir)]
-    (when (.exists results-root)
-      (->> results-root
-           (file-seq)
-           (filter #(and (.isFile %)
-                         (str/ends-with? (.getName %) ".md")))))))
-
 (defn- build-evaluation-context
   [experiment-dir output-file]
   (let [output-path (.getPath output-file)
@@ -103,6 +94,6 @@
 (defn run-evaluation
   [experiment-dir & {:keys [judge-model] :or {judge-model (:default-judge-model evaluator-config)}}]
   (println (str "Starting evaluation for experiment in: " experiment-dir " using judge: " judge-model))
-  (->> (find-all-trial-outputs experiment-dir)
+  (->> (exp-paths/find-all-result-files experiment-dir) ; Updated call
        (map #(build-evaluation-context experiment-dir %))
        (run-evaluations-for-contexts judge-model)))

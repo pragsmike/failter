@@ -1,24 +1,25 @@
-# **User Guide: Conducting Experiments with Failter**
+# **User Guide: Optimizing Prompts with Failter**
 
-This guide explains how to use the **Failter** command-line tool to test, evaluate, and optimize your prompts.
+This guide explains how to use the **Failter** command-line tool to systematically test, evaluate, and optimize your prompts. It is written for developers and AI assistants who need to derive fitness scores for prompt evolution.
 
-## 1. Purpose
+## 1. Core Purpose
 
 Failter is an experimentation framework designed to help you answer questions like:
 
-*   "Which of my prompt variations performs best for this task?"
-*   "Which LLM model is the most effective and efficient for my prompt?"
-*   "How consistent is a model's performance across different input documents?"
+*   "Which of my prompt variations performs best for this text transformation task?"
+*   "Which LLM model is the most cost-effective and performant for my specific use case?"
+*   "How consistently does my prompt perform across a wide range of input documents?"
+*   "How close is my prompt's output to a 'perfect,' human-verified example?"
 
-It automates the tedious process of running numerous tests, evaluating the results, and summarizing them so you can focus on making data-driven decisions to improve your prompts.
+It automates the tedious process of running numerous trials, evaluating the results, and summarizing them so you can focus on making data-driven decisions to improve your prompts.
 
 ## 2. The Experiment Workflow
 
-The Failter workflow consists of three main steps, each corresponding to a command you will run:
+The Failter workflow is a three-step pipeline executed from the command line:
 
 1.  **`experiment`**: You provide a set of inputs, prompt templates, and models. Failter runs every possible combination and generates the filtered output files.
-2.  **`evaluate`**: Failter uses a powerful "judge" LLM (like GPT-4o) to automatically review and grade the quality of each output file from the previous step.
-3.  **`report`**: Failter gathers all the metadata, performance metrics, and evaluation grades into a comprehensive summary report, delivered as both a markdown table and a CSV file.
+2.  **`evaluate`**: Failter uses a powerful "judge" LLM (e.g., GPT-4o) to automatically review and grade the quality of each output file from the previous step.
+3.  **`report`**: Failter gathers all metadata, performance metrics, and evaluation grades into a comprehensive summary report, delivered as both a markdown table and a CSV file.
 
 ## 3. Setting Up Your Experiment
 
@@ -31,39 +32,46 @@ my-prompt-test/
 │   └── another_document.txt
 ├── templates/
 │   ├── prompt_v1.md
-│   └── prompt_v2_more_specific.md
+│   └── prompt_v2_with_cot.md
+├── ground_truth/         <-- Optional but recommended
+│   ├── article_to_clean.md
+│   └── another_document.txt
 └── model-names.txt
 ```
 
 #### `inputs/` directory
-This folder contains all the source files you want to test your prompts against.
-*   The content can be plain text, markdown, or any other format the LLM can process.
-*   Having multiple input files helps test the consistency and reliability of your prompts.
+Contains all the source files you want to test your prompts against. Having multiple, diverse inputs is crucial for testing the consistency and reliability of your prompts.
 
 #### `templates/` directory
-This folder contains your different prompt variations.
-*   Each file is a complete prompt template.
+Contains your different prompt variations. Each file is a complete prompt template.
 *   **Crucially**, each template file **must** contain the placeholder token `{{INPUT_TEXT}}`. Failter will replace this token with the content of an input file during a trial.
 
-**Example `prompt_v1.md`:**
+**Example `prompt_v2_with_cot.md`:**
 ```markdown
-Please summarize the following article in three sentences.
+<scratchpad>
+First, identify all the non-narrative elements in the text below, such as subscription links, embedded post previews, and image captions. Second, rewrite the text preserving only the core narrative content with clean paragraph breaks.
+</scratchpad>
+Please clean the following article based on my thought process.
 
 ---
 {{INPUT_TEXT}}
 ```
 
 #### `model-names.txt` file
-This is a simple text file listing the LLM models you want to test.
-*   List one model name per line.
-*   The model names must match those configured in the system's LLM proxy (e.g., `ollama/qwen3:8b`, `openai/gpt-4o-mini`).
+A simple text file listing the LLM models you want to test, one per line. These names must match those configured in your [LiteLLM proxy](https://github.com/BerriAI/litellm) (e.g., `ollama/qwen3:8b`, `openai/gpt-4o-mini`).
 
-## 4. Running the Experiment
+#### `ground_truth/` directory (Optional)
+This directory enables a more objective, powerful evaluation method.
+*   It contains human-verified, "perfect" versions of the output files.
+*   **Naming Convention:** For every file in `inputs/`, there should be a corresponding file in `ground_truth/` with the **exact same name**.
+*   If a ground truth file is present for an input, the `evaluate` step will use it as a gold standard for comparison, resulting in a more objective `ground-truth` evaluation method. If it's absent, Failter seamlessly falls back to `rules-based` evaluation for that trial.
 
-Open your terminal or command prompt and navigate to the Failter project's root directory. All commands are run from there.
+## 4. Running the Pipeline
+
+All commands are run from the project root.
 
 #### Step 1: Execute the Experiment
-This command will create a new `results/` directory inside your experiment folder and populate it with the filtered output from each trial.
+This command creates a `results/` directory inside your experiment folder and populates it with the filtered output from each trial.
 
 ```bash
 # We strongly recommend a "dry run" first to verify your setup
@@ -72,68 +80,52 @@ clj -M:run experiment path/to/my-prompt-test --dry-run
 # Once verified, run the live experiment
 clj -M:run experiment path/to/my-prompt-test
 ```
-*This step can take a long time, depending on the number of inputs, templates, models, and the speed of the models.*
 
 #### Step 2: Evaluate the Results
-This command will create `.eval` files containing a grade and rationale for each successful trial.
+This command creates `.eval` files containing a grade and rationale for each successful trial.
 
 ```bash
-clj -M:run evaluate path/to/my-prompt-test
+# Use a powerful, cost-effective model as the judge
+clj -M:run evaluate path/to/my-prompt-test --judge-model openai/gpt-4o-mini
 ```
 
 #### Step 3: Generate the Final Report
-This is the final step. It will print a summary table to your screen and also save `report.md` and `report.csv` inside your experiment directory.
+This is the final step. It prints a summary table to your screen and also saves `report.md` and `report.csv` inside your experiment directory.
 
 ```bash
 clj -M:run report path/to/my-prompt-test
 ```
 
-## 5. Finding and Interpreting the Results
+## 5. Interpreting the Results for Prompt Evolution
 
-After running the full pipeline, your experiment directory will look like this:
+After running the full pipeline, analyze the generated `report.md` to determine the "fitness" of your prompt variations.
 
+**Example Report (`report.md`):**
 ```
-my-prompt-test/
-├── inputs/
-├── templates/
-├── results/
-│   ├── openai-gpt-4o-mini_prompt-v1/
-│   │   ├── article_to_clean.md         <-- The filtered output
-│   │   ├── article_to_clean.md.eval    <-- The judge's evaluation
-│   │   └── article_to_clean.md.thoughts  <-- The model's "internal monologue" (if any)
-│   └── ollama-qwen3-8b_prompt-v2/
-│       └── ...
-├── model-names.txt
-├── report.md                             <-- Your final summary (human-readable)
-└── report.csv                            <-- Your final summary (for spreadsheets)
+Model              | Template               | Avg Score  | Avg Time(s) | Avg Cost   | Trials  | Errors | Eval Methods               | Grade Distribution
+-------------------------------------------------------------------------------------------------------------------------------------------------------
+openai/gpt-4o-mini | prompt_v2_with_cot.md  | 4.80       | 5.21        | $0.00015   | 10      | 0      | 10 ground-truth            | {"A" 8, "B" 2}
+openai/gpt-4o-mini | prompt_v1.md           | 4.50       | 4.95        | $0.00014   | 10      | 0      | 4 ground-truth, 6 rules-based | {"A" 5, "B" 5}
+ollama/qwen3:8b    | prompt_v2_with_cot.md  | 3.20       | 35.80       | $0.00000   | 10      | 1      | 1 failed, 9 ground-truth   | {"B" 2, "C" 7, "F" 1}
 ```
 
-### Understanding the Output Files
+### How to Make Decisions:
 
-*   **Filtered Output (`article_to_clean.md`)**: This is the main result. Open it to inspect the text generated by the model. Its YAML frontmatter contains valuable metadata:
-    *   `filtered-by-model`: The model used.
-    *   `filtered-by-template`: The prompt template used.
-    *   `execution-time-ms`: How long the LLM call took.
-    *   `token-usage`: The number of tokens processed.
-    *   `estimated-cost`: The cost of the API call, if available.
-    *   `error`: If the trial failed, this key will contain the error message.
-*   **Thoughts File (`.thoughts`)**: If the model generated an "internal monologue" (e.g., inside `<think>...</think>` tags), it is saved here. This is extremely useful for debugging *why* a model is misinterpreting your prompt.
-*   **Evaluation File (`.eval`)**: This contains the structured YAML output from the judge model, including a `grade` (A-F) and a `rationale`.
+1.  **`Avg Score`:** The primary metric for quality. Higher is better. Here, `prompt_v2_with_cot.md` is the clear winner on quality.
 
-### Interpreting the Final Report
+2.  **`Eval Methods`:** This tells you how the scores were derived. A score from a `ground-truth` evaluation is generally more reliable and objective than one from `rules-based`. This column helps you trust your results.
 
-The `report.md` and `report.csv` files provide the high-level summary for decision-making.
+3.  **`Grade Distribution`:** The most important column for understanding **consistency**. A prompt that scores `{"A" 8, "B" 2}` is far more reliable than one that scores `{"A" 5, "F" 5}`, even if their average scores are similar. Look for tight groupings in the higher grades.
 
-| Model                 | Template         | Avg Score | Avg Time(s) | Avg Cost  | Trials | Errors | Grade Distribution |
-| --------------------- | ---------------- | --------- | ----------- | --------- | ------ | ------ | ------------------ |
-| openai/gpt-4o-mini    | prompt_v2        | 4.80      | 5.21        | $0.00015  | 5      | 0      | `{"A" 4, "B" 1}`   |
-| ollama/qwen3:8b       | prompt_v2        | 4.20      | 35.80       | $0.00000  | 5      | 0      | `{"A" 2, "B" 2}`   |
-| openai/gpt-4o-mini    | prompt_v1        | 3.00      | 4.95        | $0.00014  | 5      | 0      | `{"C" 5}`          |
-| ollama/qwen3:8b       | prompt_v1        | 1.00      | 60.01       | $0.00000  | 5      | 5      | `{"F" 5}`          |
+4.  **`Avg Time(s)` / `Avg Cost`:** Critical metrics for production viability. Is the higher score from `prompt_v2` worth the slightly increased time and cost? Failter gives you the data to make that trade-off.
 
-*   **Avg Score**: The primary metric for quality (A=5, B=4, etc.). Higher is better.
-*   **Avg Time(s) / Avg Cost**: Metrics for performance and efficiency. Lower is better.
-*   **Errors**: The number of trials that failed due to technical issues (like a timeout).
-*   **Grade Distribution**: The most important column for understanding consistency. A combination with `{"A" 4, "F" 1}` is less reliable than one with `{"B" 5}`, even if their average scores are similar.
+5.  **`Errors`:** A high error count indicates that a specific model may be unstable or incompatible with your prompt, a key factor in selecting a production model.
 
-From the example report above, you can conclude that **`prompt_v2` is clearly superior to `prompt_v1`**, and `gpt-4o-mini` provides the highest quality results, while `qwen3:8b` is a strong, free alternative if you can tolerate slightly lower consistency and longer processing times.
+### Deeper Analysis:
+
+For any surprising or low-scoring trials, you can drill down into the artifacts in the `results/` directory:
+*   **The Output File (`.md`):** Inspect the generated text directly. The YAML frontmatter contains detailed performance metrics for that specific run.
+*   **The Thoughts File (`.thoughts`):** If the model produced an "internal monologue" (e.g., inside `<think>...</think>` tags), it is saved here. This is extremely useful for debugging *why* a model is misinterpreting your prompt.
+*   **The Evaluation File (`.eval`):** This contains the structured YAML output from the judge model, including the `grade` and a specific `rationale` explaining what the model did right or wrong.
+
+By analyzing the report and drilling down into the artifacts, you can form a new hypothesis, create a `prompt_v3.md`, and repeat the process, iteratively evolving your prompts based on quantitative evidence.

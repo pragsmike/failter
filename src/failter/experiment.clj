@@ -1,29 +1,11 @@
 (ns failter.experiment
   (:require [clojure.string :as str]
             [clojure.java.io :as io]
-            [clojure.pprint :as pprint]))
-
-(defn- sanitize-name
-  "Replaces filesystem-unfriendly characters in a string with hyphens."
-  [s]
-  (-> s (str/replace #"\.md$" "") (str/replace #"[/:.\s]+" "-")))
-
-(defn- build-trial-params
-  "Constructs the full parameter map for a single trial run."
-  [experiment-dir model-name template-path input-path]
-  (let [sanitized-model    (sanitize-name model-name)
-        sanitized-template (sanitize-name (.getName (io/file template-path)))
-        output-dir-name    (str sanitized-model "_" sanitized-template)
-        output-dir         (io/file experiment-dir "results" output-dir-name)
-        input-filename     (.getName (io/file input-path))
-        output-file        (io/file output-dir input-filename)]
-    {:model-name    model-name
-     :template-path template-path
-     :input-path    input-path
-     :output-path   (.getPath output-file)}))
+            [clojure.pprint :as pprint]
+            [failter.exp-paths :as exp-paths]))
 
 (defn- list-file-paths [dir]
-  (->> (io/file dir) .listFiles (filter #(.isFile %)) (map #(.getPath %))))
+  (->> (.listFiles dir) (filter #(.isFile %)) (map #(.getPath %))))
 
 (defn- read-model-names [file-path]
   (with-open [rdr (io/reader file-path)]
@@ -36,12 +18,9 @@
 
 (defn conduct-experiment [experiment-dir trial-fn]
   (try
-    (let [inputs-dir    (io/file experiment-dir "inputs")
-          templates-dir (io/file experiment-dir "templates")
-          models-file   (io/file experiment-dir "model-names.txt")
-          inputs        (list-file-paths inputs-dir)
-          templates     (list-file-paths templates-dir)
-          models        (read-model-names models-file)
+    (let [inputs        (list-file-paths (exp-paths/inputs-dir experiment-dir))
+          templates     (list-file-paths (exp-paths/templates-dir experiment-dir))
+          models        (read-model-names (exp-paths/models-file experiment-dir))
           total-trials  (* (count inputs) (count templates) (count models))]
       (println (str "Starting experiment in: " experiment-dir))
       (println (str "Found " (count inputs) " inputs, " (count templates) " templates, " (count models) " models."))
@@ -49,10 +28,14 @@
       (doseq [input-path    inputs
               template-path templates
               model-name    models]
-        (let [trial-params (build-trial-params experiment-dir model-name template-path input-path)
-              output-file  (io/file (:output-path trial-params))]
+        (let [output-path  (exp-paths/output-path-for-trial experiment-dir model-name template-path input-path)
+              output-file  (io/file output-path)
+              trial-params {:model-name    model-name
+                            :template-path template-path
+                            :input-path    input-path
+                            :output-path   output-path}]
           (if (.exists output-file)
-            (println (str "Skipping existing trial: " (:output-path trial-params)))
+            (println (str "Skipping existing trial: " output-path))
             (try
               (trial-fn trial-params)
               (catch Exception e

@@ -2,11 +2,11 @@
   (:require [failter.llm-interface :as llm]
             [failter.frontmatter :as fm]
             [clojure.string :as str]
-            [clojure.java.io :as io]))
+            [clojure.java.io :as io]
+            [failter.exp-paths :as exp-paths]))
 
 (defn run-single-trial
-  "Executes a single filtering trial. Measures time, handles errors, and now
-  extracts any model 'monologue' into a separate .thoughts file."
+  "Executes a single filtering trial."
   [{:keys [model-name template-path input-path output-path]}]
   (println "--- Running Trial (Frontmatter-aware) ---")
   (println (str "  Model: " model-name))
@@ -29,34 +29,25 @@
     (io/make-parents output-path)
 
     (if-let [error-msg (:error llm-response)]
-      ;; --- ERROR PATH ---
       (let [error-metadata (assoc base-metadata :error error-msg)
             final-content (fm/serialize error-metadata "")]
         (println (str "  LLM call failed. Writing error metadata to: " output-path))
         (spit output-path final-content))
 
-      ;; --- SUCCESS PATH ---
-      (let [ ;; Define regexes for extraction and stripping
-            monologue-content-regex #"(?s)<(?:think|scratchpad)>(.*?)</(?:think|scratchpad)>"
+      (let [monologue-content-regex #"(?s)<(?:think|scratchpad)>(.*?)</(?:think|scratchpad)>"
             monologue-block-regex   #"(?s)(<think>.*?</think>|<scratchpad>.*?</scratchpad>)\s*"
-
             {:keys [content usage cost]} llm-response
-
-            ;; Extract the monologue and create the cleaned content
             thoughts (some-> (re-find monologue-content-regex content) second str/trim)
             cleaned-content (str/replace content monologue-block-regex "")
-
             success-metadata (assoc base-metadata
                                     :token-usage usage
                                     :estimated-cost cost)
             final-content (fm/serialize success-metadata cleaned-content)
-            thoughts-path (str output-path ".thoughts")]
+            thoughts-path (exp-paths/thoughts-path output-path)]
 
-        ;; 1. Write the main, cleaned output file
         (println (str "  LLM call succeeded. Writing response to: " output-path))
         (spit output-path final-content)
 
-        ;; 2. Conditionally write the .thoughts file
         (when (and thoughts (not (str/blank? thoughts)))
           (println (str "  Extracted monologue. Writing to: " thoughts-path))
           (spit thoughts-path thoughts))))

@@ -3,18 +3,17 @@
             [clj-yaml.core :as yaml]
             [failter.frontmatter :as fm]
             [clojure.string :as str]
-            [clojure-csv.core :as csv]))
+            [clojure-csv.core :as csv]
+            [failter.exp-paths :as exp-paths]))
 
 (def grade-scores {"A" 5 "B" 4 "C" 3 "D" 2 "F" 1})
 
 (defn- get-trial-result
-  "Parses data from a primary output file. If a corresponding .eval file
-  exists, its data is merged. If not, it checks for an :error in the
-  frontmatter and synthetically creates an 'F' grade."
+  "Parses data from a primary output file and its corresponding .eval file."
   [output-file]
   (try
     (let [output-meta (:frontmatter (fm/parse-file-content (slurp output-file)))
-          eval-file   (io/file (str (.getPath output-file) ".eval"))]
+          eval-file   (io/file (exp-paths/eval-path (.getPath output-file)))]
       (cond
         (.exists eval-file)
         (let [eval-content (slurp eval-file)
@@ -88,13 +87,12 @@
 
 (defn generate-report [experiment-dir]
   (println (str "Generating report for experiment: " experiment-dir))
-  (let [results-root (io/file experiment-dir "results")
+  (let [results-root (exp-paths/results-dir experiment-dir)
         output-files (when (.exists results-root)
                        (->> results-root
                             (file-seq)
                             (filter #(and (.isFile %) (str/ends-with? (.getName %) ".md")))))
-        
-        ;; --- REFACTORED PIPELINE ---
+
         summaries (->> output-files
                        (map get-trial-result)
                        (remove nil?)
@@ -106,12 +104,10 @@
                        (reverse))
 
         display-summaries (map prepare-summary-for-display summaries)
-
         table-string (format-as-table display-summaries)
         csv-string   (format-as-csv display-summaries)
-
-        report-md-path  (str (io/file experiment-dir "report.md"))
-        report-csv-path (str (io/file experiment-dir "report.csv"))]
+        report-md-path  (exp-paths/report-md-path experiment-dir)
+        report-csv-path (exp-paths/report-csv-path experiment-dir)]
 
     (println "\n--- Experiment Report ---\n")
     (println table-string)

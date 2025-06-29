@@ -7,22 +7,27 @@
             [failter.frontmatter :as fm]
             [failter.llm-interface :as llm]
             [failter.log :as log]
+            [failter.scoring :as scoring] ;; <-- NEW require
             [failter.trial :as trial]
             [failter.util :as util]))
 
-;; build-judge-prompt is unchanged
 (defn- build-judge-prompt
   [{:keys [has-ground-truth? ground-truth-content input-content template-content output-content]}]
-  (let [prompt-key (if has-ground-truth? :ground-truth :standard)
+  (let [strategy (get-in config/config [:evaluator :scoring-strategy])
+        prompt-key (if has-ground-truth? :ground-truth :standard)
         prompt-path (get-in config/config [:evaluator :prompts prompt-key])
-        eval-prompt-template (slurp prompt-path)]
+        eval-prompt-template (slurp prompt-path)
+        ;; Get the correct instructions from the scoring strategy.
+        scoring-instructions (scoring/get-prompt-instructions {:strategy strategy})]
     (if has-ground-truth?
       (-> eval-prompt-template
+          (str/replace "{{SCORING_INSTRUCTIONS}}" scoring-instructions) ;; <-- Inject instructions
           (str/replace "{{ORIGINAL_INPUT}}" input-content)
           (str/replace "{{PROMPT_TEMPLATE}}" template-content)
           (str/replace "{{GROUND_TRUTH_EXAMPLE}}" ground-truth-content)
           (str/replace "{{GENERATED_OUTPUT}}" output-content))
       (-> eval-prompt-template
+          (str/replace "{{SCORING_INSTRUCTIONS}}" scoring-instructions) ;; <-- Inject instructions
           (str/replace "{{ORIGINAL_INPUT}}" input-content)
           (str/replace "{{PROMPT_TEMPLATE}}" template-content)
           (str/replace "{{GENERATED_OUTPUT}}" output-content)))))
@@ -51,7 +56,8 @@
 
 (defn- execute-evaluation!
   [judge-model context]
-  (let [final-prompt (build-judge-prompt context)
+  (let [strategy (get-in config/config [:evaluator :scoring-strategy])
+        final-prompt (build-judge-prompt context)
         eval-method (if (:has-ground-truth? context) "ground-truth" "rules-based")
         trial-output-path (-> context :trial :output-path)]
     (log/info (str "--- Evaluating Trial Output (" eval-method ") ---"))
@@ -59,10 +65,12 @@
     (let [eval-response (llm/call-model judge-model final-prompt :timeout 600000)]
       (if-let [err (:error eval-response)]
         (log/error (str "Judge LLM failed for " trial-output-path "\n" err))
-        (let [llm-output (util/parse-yaml-block (:content eval-response))
-              grade (second (re-find #"(?m)grade:\s*([A-DF])" llm-output))
-              rationale (second (re-find #"(?ms)rationale:\s*(.*)" llm-output))
-              eval-record (feval/->Eval (:trial context) grade (str/trim rationale) eval-method judge-model nil)]
+        (let [llm-output (:content eval-response)
+              ;; Use the scoring strategy to parse the score.
+              score (scoring/parse-raw-score strategy llm-output)
+              rationale (second (re-find #"(?ms)rationale:\s*(.*)" (util/parse-yaml-block llm-output)))
+              ;; Create the Eval record with the numeric score.
+              eval-record (feval/->Eval (:trial context) score (str/trim rationale) eval-method judge-model nil)]
           (feval/write-eval eval-record)
           (log/info (str "  Writing evaluation to: " (exp-paths/eval-path trial-output-path))))))))
 

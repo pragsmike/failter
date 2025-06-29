@@ -14,22 +14,7 @@ Your job is to judge how well the `GENERATED_OUTPUT` followed the instructions i
 2.  **Compliance with Instructions:** Does the `GENERATED_OUTPUT` successfully apply all transformations specified in the `PROMPT_TEMPLATE` (e.g., removing pollution, preserving frontmatter), as perfectly demonstrated by the `GROUND_TRUTH_EXAMPLE`?
 3.  **Absence of Errors:** Are there any hallucinations, deletions of correct content, or formatting errors when compared to the `GROUND_TRUTH_EXAMPLE`?
 
-## Grading Scale:
-
--   **A:** Perfect or near-perfect match to the `GROUND_TRUTH_EXAMPLE`.
--   **B:** Good execution with minor deviations from the `GROUND_TRUTH_EXAMPLE` (e.g., a small piece of pollution was missed, minor extra whitespace).
--   **C:** Acceptable, but with noticeable differences from the `GROUND_TRUTH_EXAMPLE` (e.g., a major pollution element was missed, a small piece of valid content was deleted).
--   **D:** Poor execution. The output significantly deviates from the `GROUND_TRUTH_EXAMPLE` in content or structure.
--   **F:** Completely failed. The output is nonsensical, empty, or bears little resemblance to the `GROUND_TRUTH_EXAMPLE`.
-
-## Output Format:
-
-You MUST provide your response as a single YAML block. Do NOT include any other explanatory text or markdown formatting.
-
-```yaml
-grade: [Your Grade: A, B, C, D, or F]
-rationale: [A concise, one-to-three sentence explanation for your grade. Specifically mention how it compared to the ground truth.]
-```
+{{SCORING_INSTRUCTIONS}}
 
 ## Context for Evaluation
 ORIGINAL_INPUT:

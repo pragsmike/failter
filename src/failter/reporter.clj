@@ -1,33 +1,36 @@
 (ns failter.reporter
   (:require [clojure.string :as str]
             [clojure-csv.core :as csv]
+            [clojure.java.io :as io]
+            [failter.config :as config] ;; <-- NEW require
             [failter.eval :as feval]
             [failter.exp-paths :as exp-paths]
-            [failter.log :as log]))
-
-(def grade-scores {"A" 5 "B" 4 "C" 3 "D" 2 "F" 1})
+            [failter.log :as log]
+            [failter.scoring :as scoring])) ;; <-- NEW require
 
 (defn calculate-summary [evals]
-  (let [first-eval (first evals)
+  (let [strategy (get-in config/config [:evaluator :scoring-strategy])
+        first-eval (first evals)
         first-trial (:trial first-eval)
-        grades (keep :grade evals)
-        scores (keep grade-scores grades)
+        scores (keep :score evals) ;; <-- Scores are now numeric
         times  (keep #(:execution-time-ms (:trial %)) evals)
         costs  (keep #(:estimated-cost (:trial %)) evals)
         errors (filter #(-> % :trial :error) evals)
         methods (frequencies (keep :method evals))]
     {:model (:model-name first-trial)
-     :template (.getName (clojure.java.io/file (:template-path first-trial)))
+     :template (.getName (io/file (:template-path first-trial)))
      :trials (count evals)
      :errors (count errors)
+     ;; Avg score is now a simple average.
      :avg-score (if (seq scores) (/ (double (apply + scores)) (count scores)) 0.0)
      :avg-time-s (if (seq times) (/ (double (apply + times)) 1000 (count times)) 0.0)
      :avg-cost (if (and (seq costs) (every? some? costs)) (/ (double (apply + costs)) (count costs)) 0.0)
-     :grade-dist (frequencies grades)
+     ;; Use the scoring strategy to format the distribution.
+     :score-dist (scoring/format-score-distribution strategy scores)
      :eval-methods methods}))
 
 (defn- prepare-summary-for-display
-  [{:keys [model template avg-score avg-time-s avg-cost trials errors grade-dist eval-methods]}]
+  [{:keys [model template avg-score avg-time-s avg-cost trials errors score-dist eval-methods]}]
   {:model model
    :template template
    :avg-score (format "%.2f" avg-score)
@@ -35,7 +38,7 @@
    :avg-cost (format "$%.6f" avg-cost)
    :trials (str trials)
    :errors (str errors)
-   :grade-dist (pr-str (into (sorted-map-by #(compare %2 %1)) grade-dist))
+   :score-dist score-dist ;; <-- Use the new score distribution string
    :eval-methods (str/join ", " (for [[k v] eval-methods] (str v " " k)))})
 
 (defn- format-as-table [display-summaries]
@@ -48,9 +51,9 @@
                           (format "%-7s" "Trials")
                           (format "%-6s" "Errors")
                           (format "%-18s" "Eval Methods")
-                          "Grade Distribution"])
+                          "Score Distribution"]) ;; <-- Renamed column
         separator (str/join "" (repeat 155 "-"))
-        rows (for [{:keys [model template avg-score avg-time-s avg-cost trials errors grade-dist eval-methods]} display-summaries]
+        rows (for [{:keys [model template avg-score avg-time-s avg-cost trials errors score-dist eval-methods]} display-summaries]
                (str/join " | "
                          [(format "%-28s" model)
                           (format "%-20s" template)
@@ -60,13 +63,13 @@
                           (format "%-7s" trials)
                           (format "%-6s" errors)
                           (format "%-18s" eval-methods)
-                          grade-dist]))]
+                          score-dist]))]
     (str/join "\n" (concat [header separator] rows))))
 
 (defn- format-as-csv [display-summaries]
-  (let [header ["Model" "Template" "Avg_Score" "Avg_Time_s" "Avg_Cost" "Trials" "Errors" "Eval_Methods" "Grade_Distribution"]
-        rows (for [{:keys [model template avg-score avg-time-s avg-cost trials errors grade-dist eval-methods]} display-summaries]
-               [model template avg-score avg-time-s avg-cost trials errors eval-methods grade-dist])
+  (let [header ["Model" "Template" "Avg_Score" "Avg_Time_s" "Avg_Cost" "Trials" "Errors" "Eval_Methods" "Score_Distribution"]
+        rows (for [{:keys [model template avg-score avg-time-s avg-cost trials errors score-dist eval-methods]} display-summaries]
+               [model template avg-score avg-time-s avg-cost trials errors eval-methods score-dist])
         data-to-write (cons header rows)]
     (csv/write-csv data-to-write)))
 
@@ -87,8 +90,8 @@
         report-md-path  (exp-paths/report-md-path experiment-dir)
         report-csv-path (exp-paths/report-csv-path experiment-dir)]
 
-    (log/info "\n--- Experiment Report ---")
-    (log/info (str "\n" table-string))
+    (log/info "--- Experiment Report ---")
+    (log/info table-string)
 
     (log/info (str "Writing markdown report to: " report-md-path))
     (spit report-md-path table-string)

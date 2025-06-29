@@ -84,4 +84,4 @@
 
           (log/info (usage summary)))))
     (finally
-      (log/shutdown-logging!))))
+      (shutdown-agents))))

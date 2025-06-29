@@ -9,5 +9,6 @@
                 :template-path "prompts/cleanup-small-model.md"}
 
    :evaluator {:default-judge-model "openai/gpt-4o"
+               :scoring-strategy :letter-grade ;; <-- NEW: Centralized strategy selection
                :prompts {:standard "prompts/evaluation-prompt.md"
                          :ground-truth "prompts/evaluation-prompt-gt.md"}}})

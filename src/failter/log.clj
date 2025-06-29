@@ -34,9 +34,7 @@
 (defn setup-logging!
   "Configures Timbre with sane defaults for the application."
   []
-  (tel/set-min-level! :info))
-
-(defn shutdown-logging! []
+  (tel/set-min-level! :info)
   (tel/call-on-shutdown!
    (fn [] (tel/stop-handlers!))))
 

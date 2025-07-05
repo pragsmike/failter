@@ -58,4 +58,7 @@
       (->> results-root
            (file-seq)
            (filter #(and (.isFile %)
-                         (str/ends-with? (.getName %) ".md")))))))
+                         ;; FIX: Find any result file, not just .md, by excluding
+                         ;; Failter's own ancillary artifact files.
+                         (not (str/ends-with? (.getName %) ".thoughts"))
+                         (not (str/ends-with? (.getName %) ".eval"))))))))

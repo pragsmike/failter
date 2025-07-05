@@ -7,7 +7,7 @@
             [failter.frontmatter :as fm]
             [failter.llm-interface :as llm]
             [failter.log :as log]
-            [failter.scoring :as scoring] ;; <-- NEW require
+            [failter.scoring :as scoring]
             [failter.trial :as trial]
             [failter.util :as util]))
 
@@ -17,17 +17,16 @@
         prompt-key (if has-ground-truth? :ground-truth :standard)
         prompt-path (get-in config/config [:evaluator :prompts prompt-key])
         eval-prompt-template (slurp prompt-path)
-        ;; Get the correct instructions from the scoring strategy.
         scoring-instructions (scoring/get-prompt-instructions {:strategy strategy})]
     (if has-ground-truth?
       (-> eval-prompt-template
-          (str/replace "{{SCORING_INSTRUCTIONS}}" scoring-instructions) ;; <-- Inject instructions
+          (str/replace "{{SCORING_INSTRUCTIONS}}" scoring-instructions)
           (str/replace "{{ORIGINAL_INPUT}}" input-content)
           (str/replace "{{PROMPT_TEMPLATE}}" template-content)
           (str/replace "{{GROUND_TRUTH_EXAMPLE}}" ground-truth-content)
           (str/replace "{{GENERATED_OUTPUT}}" output-content))
       (-> eval-prompt-template
-          (str/replace "{{SCORING_INSTRUCTIONS}}" scoring-instructions) ;; <-- Inject instructions
+          (str/replace "{{SCORING_INSTRUCTIONS}}" scoring-instructions)
           (str/replace "{{ORIGINAL_INPUT}}" input-content)
           (str/replace "{{PROMPT_TEMPLATE}}" template-content)
           (str/replace "{{GENERATED_OUTPUT}}" output-content)))))
@@ -48,7 +47,6 @@
           :trial trial
           :input-content (:body (fm/parse-file-content (slurp input-path)))
           :output-content (:body (fm/parse-file-content (slurp output-path)))
-          ;; The prompt template itself may have frontmatter; we only want the body.
           :template-content (:body (fm/parse-file-content (slurp full-template-path)))}
          (if (.exists gt-file)
            {:has-ground-truth? true
@@ -67,10 +65,9 @@
       (if-let [err (:error eval-response)]
         (log/error (str "Judge LLM failed for " trial-output-path "\n" err))
         (let [llm-output (:content eval-response)
-              ;; Use the scoring strategy to parse the score.
               score (scoring/parse-raw-score strategy llm-output)
-              rationale (second (re-find #"(?ms)rationale:\s*(.*)" (util/parse-yaml-block llm-output)))
-              ;; Create the Eval record with the numeric score.
+              ;; --- FIX: Default to an empty string if rationale is not found ---
+              rationale (or (second (re-find #"(?ms)rationale:\s*(.*)" (util/parse-yaml-block llm-output))) "")
               eval-record (feval/->Eval (:trial context) score (str/trim rationale) eval-method judge-model nil)]
           (feval/write-eval eval-record)
           (log/info (str "  Writing evaluation to: " (exp-paths/eval-path trial-output-path))))))))

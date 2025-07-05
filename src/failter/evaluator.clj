@@ -48,7 +48,8 @@
           :trial trial
           :input-content (:body (fm/parse-file-content (slurp input-path)))
           :output-content (:body (fm/parse-file-content (slurp output-path)))
-          :template-content (slurp full-template-path)}
+          ;; The prompt template itself may have frontmatter; we only want the body.
+          :template-content (:body (fm/parse-file-content (slurp full-template-path)))}
          (if (.exists gt-file)
            {:has-ground-truth? true
             :ground-truth-content (:body (fm/parse-file-content (slurp gt-file)))}

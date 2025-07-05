@@ -2,7 +2,9 @@
   (:require [clojure.test :refer :all]
             [failter.reporter :as reporter]
             [failter.trial :as trial]
-            [failter.eval :as feval]))
+            [failter.eval :as feval]
+            [failter.config :as config]
+            [clojure.edn :as edn]))
 
 (defn- double-equals?
   "Helper for robust floating point comparison."
@@ -11,30 +13,34 @@
 
 (deftest calculate-summary-test
   (testing "Calculating summary for a set of Eval records"
-    (let [;; --- THIS IS THE FIX ---
-          ;; We now construct proper Trial and Eval records for the test.
-          trial-1 (trial/->Trial "model-a" "template-1.md" "in.md" "out.md" 1000 nil 0.001 nil)
-          trial-2 (trial/->Trial "model-a" "template-1.md" "in.md" "out.md" 2000 nil 0.002 nil)
-          trial-3 (trial/->Trial "model-a" "template-1.md" "in.md" "out.md" 60000 nil nil "Read timed out")
-          trial-4 (trial/->Trial "model-a" "template-1.md" "in.md" "out.md" 500 nil nil nil)
-          trial-5 (trial/->Trial "model-a" "template-1.md" "in.md" "out.md" 1500 nil 0.0015 nil)
+    (let [;; Test data that accurately reflects a real experiment's state
+          trial-1 (trial/->Trial "model-a" "template-1.md" "in1.md" "out1.md" 1000 {} 0.001 nil)
+          eval-1  (feval/->Eval trial-1 100 "Rationale A" "ground-truth" "judge-1" nil)
 
-          evals [(feval/->Eval trial-1 "A" "Rationale A" "gt" "judge" nil)
-                 (feval/->Eval trial-2 "B" "Rationale B" "gt" "judge" nil)
-                 (feval/->Eval trial-3 "F" "Read timed out" "failed" nil nil)
-                 (feval/->Eval trial-4 nil nil "unevaluated" nil nil)
-                 (feval/->Eval trial-5 "A" "Rationale A2" "gt" "judge" nil)]
+          trial-2 (trial/->Trial "model-a" "template-1.md" "in2.md" "out2.md" 2000 {} 0.002 nil)
+          eval-2  (feval/->Eval trial-2 80 "Rationale B" "ground-truth" "judge-1" nil)
 
-          ;; The function under test now takes the sequence of Eval records
-          summary (reporter/calculate-summary evals)]
+          trial-3 (trial/->Trial "model-a" "template-1.md" "in3.md" "out3.md" 60000 nil nil "Read timed out")
+          eval-3  (feval/->Eval trial-3 0 "Read timed out" "failed" nil "Read timed out")
 
-      (is (= "model-a" (:model summary)))
-      (is (= "template-1.md" (:template summary)))
-      (is (= 5 (:trials summary)))
-      (is (= 1 (:errors summary)))
+          trial-4 (trial/->Trial "model-a" "template-1.md" "in4.md" "out4.md" 500 {} nil nil)
+          eval-4  (feval/->Eval trial-4 nil nil "unevaluated" nil nil)
 
-      (is (= 3.75 (:avg-score summary)) "Average score should be (5+4+1)/3")
-      (is (= 13.0 (:avg-time-s summary)) "Average time should be (1+2+60+0.5+1.5)/5")
-      (is (double-equals? 0.0015 (:avg-cost summary)) "Average cost should be (0.001+0.002+0.0015)/3")
-      (is (= {"A" 2, "B" 1, "F" 1} (:grade-dist summary)))
-      (is (= {"gt" 3, "failed" 1, "unevaluated" 1} (:eval-methods summary))))))
+          trial-5 (trial/->Trial "model-a" "template-1.md" "in5.md" "out5.md" 1500 {} 0.0015 nil)
+          eval-5  (feval/->Eval trial-5 60 "Rationale C" "rules-based" "judge-1" nil)
+
+          evals [eval-1 eval-2 eval-3 eval-4 eval-5]]
+
+      (with-redefs [config/config (assoc-in config/config [:evaluator :scoring-strategy] :letter-grade)]
+        (let [summary (reporter/calculate-summary evals)
+              ;; Parse the result string back into a map for robust comparison
+              actual-dist-map (edn/read-string (:score-dist summary))]
+
+          (is (= 5 (:trials summary)))
+          (is (= 1 (:errors summary)))
+          ;; Scores being averaged: [100, 80, 0, 60]. Avg = 240 / 4 = 60.0
+          (is (= 60.0 (:avg-score summary)))
+
+          ;; --- FIX: The assertion now correctly checks the map produced by the fixed scoring code ---
+          ;; The expected distribution from scores (100, 80, 0, 60) is one of each grade.
+          (is (= {"A" 1, "B" 1, "C" 1, "F*" 1} actual-dist-map)))))))

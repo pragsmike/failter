@@ -40,15 +40,17 @@ rationale: [A concise, one-to-three sentence explanation for your grade. Be spec
     (get grade-to-score grade-char 0)))
 
 (defmethod format-score-distribution :letter-grade [_ scores]
-  (let [score-to-grade #(condp >= %
-                          100 "A"
-                          80 "B"
-                          60 "C"
-                          40 "D"
-                          20 "F"
-                          "F*")
+  (let [;; --- FIX: The `condp` logic was flawed. A `cond` is clearer and correct. ---
+        score-to-grade #(cond
+                         (>= % 100) "A"
+                         (>= % 80) "B"
+                         (>= % 60) "C"
+                         (>= % 40) "D"
+                         (>= % 20) "F"
+                         :else "F*") ; For scores < 20, like 0 for a failure.
         grades (map score-to-grade scores)
         dist (frequencies grades)]
+    ;; Sort keys descending (A, B, C...) for the report
     (pr-str (into (sorted-map-by #(compare %2 %1)) dist))))
 
 

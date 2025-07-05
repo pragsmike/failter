@@ -16,7 +16,8 @@
 
     (let [input-content (slurp input-path)
           {:keys [frontmatter body]} (fm/parse-file-content input-content)
-          prompt-template (slurp template-path)
+          ;; The prompt template itself may have frontmatter; we only want the body.
+          prompt-template (:body (fm/parse-file-content (slurp template-path)))
           final-prompt (str/replace prompt-template "{{INPUT_TEXT}}" body)
 
           start-time (System/nanoTime)

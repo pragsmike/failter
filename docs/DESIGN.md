@@ -1,6 +1,6 @@
 # **Failter: Design Document**
 
-**Version:** 3.1
+**Version:** 3.2
 **Audience:** Developers joining the project who need to understand its architecture, design principles, and how to contribute.
 
 ## 1. Overview & Philosophy
@@ -8,6 +8,8 @@
 **Failter** is a command-line framework for systematically filtering text using Large Language Models (LLMs). Its primary purpose is to serve as an experimentation harness to compare the performance of different models and prompt engineering strategies for specific text transformation tasks.
 
 The core philosophy is to treat **prompts as code**. Instead of implementing filtering logic in a traditional programming language, Failter defines transformations in natural language via prompt templates. This allows for rapid iteration on the logic itself. The framework then provides the necessary machinery to rigorously test, evaluate, and analyze the performance of these prompts across a wide range of variables.
+
+A key extension of this philosophy is that prompt templates themselves can be self-describing artifacts, optionally containing their own YAML frontmatter for metadata, which is ignored by the Failter runtime.
 
 ## 2. Core Concepts
 
@@ -32,7 +34,7 @@ Failter operates as a three-stage pipeline, orchestrated by the user via command
                                                                                 V
                                                                     +----------------------+
                                                                     | <exp_dir>/results/   |
-                                                                    |  (Hydrated .md files)|
+                                                                    |  (Hydrated files)    |
                                                                     +----------------------+
                                                                                 |
                                                                                 |
@@ -42,7 +44,7 @@ Failter operates as a three-stage pipeline, orchestrated by the user via command
                                         +---------------------+                 |
                                                  ^   ^                          |
 +------------+      +------------------+         |   |         +----------------+
-| <exp_dir>/ |----->| failter evaluate |---------+   |-------->|  Seq of Eval   |
+| <exp-dir>/ |----->| failter evaluate |---------+   |-------->|  Seq of Eval   |
 +------------+      |    (Producer)    |             |         |    records     |
                     +------------------+             |         +----------------+
                                                      |                |
@@ -52,6 +54,7 @@ Failter operates as a three-stage pipeline, orchestrated by the user via command
 +------------+      |   (Consumer)    |                      | report.csv      |
                     +-----------------+                      +-----------------+
 ```
+
 The `evaluate` and `report` stages are decoupled from the specific logic of how a score is requested, parsed, and displayed. They delegate this "policy" to the `failter.scoring` namespace.
 
 ## 4. Key Design Principles
@@ -73,7 +76,7 @@ The framework includes a sophisticated, optional evaluation method that compares
 *   `failter.core`: Main application entry point and command-line dispatcher.
 *   `failter.config`: A single map containing all application configuration, including the active `:scoring-strategy`.
 *   `failter.util`: A utility belt for small, generic, pure helper functions.
-*   `failter.exp-paths`: The definitive API for the experiment's directory structure.
+*   `failter.exp-paths`: The definitive API for the experiment's directory structure. **Finds all result files**, excluding Failter's own `.eval` and `.thoughts` artifacts.
 
 *   `failter.trial`: Defines the `Trial` record and its constructors.
 *   `failter.eval`: Defines the `Eval` record (which contains a numeric `:score`) and its I/O helpers.
@@ -81,8 +84,8 @@ The framework includes a sophisticated, optional evaluation method that compares
 *   **`failter.scoring`**: The central hub for all scoring-related logic. It uses multimethods to define a "scoring strategy" protocol, which consists of three functions: `get-prompt-instructions`, `parse-raw-score`, and `format-score-distribution`. It provides concrete implementations for different strategies (e.g., `:letter-grade`, `:numeric-100`).
 
 *   `failter.experiment`: **Produces** a sequence of `Trial` records.
-*   `failter.runner`: **Consumes** a `Trial` record and executes it.
-*   `failter.evaluator`: **Consumes** completed `Trial` records and **produces** `Eval` records. It is decoupled from scoring logic; it calls `failter.scoring` to get the correct prompt instructions and to parse the numeric score from the judge LLM's response.
+*   `failter.runner`: **Consumes** a `Trial` record and executes it. It is responsible for **parsing prompt template files** to extract the body of the prompt, ignoring any YAML frontmatter.
+*   `failter.evaluator`: **Consumes** completed `Trial` records and **produces** `Eval` records. It is decoupled from scoring logic. It calls `failter.scoring` to get prompt instructions and parse the numeric score. It also **parses prompt template files** to provide the correct prompt body to the judge LLM.
 *   `failter.reporter`: A pure **consumer** of `Eval` records. It is also decoupled from scoring logic; it calls `failter.scoring` to get a formatted string representing the distribution of scores for the final report.
 
 *   `failter.llm-interface` / `failter.frontmatter`: Lower-level utility namespaces.

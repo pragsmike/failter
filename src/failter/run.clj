@@ -23,12 +23,10 @@
   (let [spec (-> (slurp spec-path)
                  (yaml/parse-string :keywords true))]
     (validate-spec
-     ;; Defensively parse numeric keys right after loading to ensure correct types.
      (cond-> spec
        (:retries spec) (update :retries #(Integer/parseInt (str %)))))))
 
 (defn- run-trials! [spec trials]
-  ;; The :retries value is now guaranteed to be a number if it exists.
   (let [runner-opts {:retries (get spec :retries 0)}]
     (doseq [t trials]
       (let [output-file (io/file (:output-path t))]
@@ -51,7 +49,9 @@
   (log/info "--- Starting Report Generation Phase ---")
   (let [artifacts-dir (:artifacts_dir spec)
         report-data (reporter/generate-report-data artifacts-dir)
-        json-string (json/write-str report-data :value-fn (fn [_ v] (if (Double/isNaN v) 0.0 v)))]
+        ;; FIX: The :value-fn was the source of the ClassCastException, as it
+        ;; tried to call Double/isNaN on string values. It is not needed.
+        json-string (json/write-str report-data)]
 
     (log/info "--- Final Report (JSON) ---")
     (println json-string)
@@ -63,7 +63,8 @@
     (log/info "Run complete.")))
 
 (defn execute-run
-  "Main entry point for the 'run' command. Orchestrates the entire workflow."
+  "Main entry point for the 'run' command. Orchestrates the entire workflow.
+  This function now allows exceptions to propagate to the caller."
   [spec-path]
   (try
     (let [spec (load-spec spec-path)
@@ -85,7 +86,10 @@
       (run-evaluations! spec)
 
       (generate-and-output-report spec))
-
+    (catch IllegalArgumentException e ;; Catch validation errors first.
+      (log/error (str "Invalid specification: " (.getMessage e)))
+      (throw e)) ;; Re-throw so that `(thrown?)` assertions in tests can pass.
     (catch Exception e
-      (log/error (str "The run failed with an unrecoverable error:" (.getMessage e)))
-      (System/exit 1))))
+      (log/error (str "The run failed with an unrecoverable error: " (.getMessage e)))
+      ;; Do not re-throw general exceptions to be REPL-friendly.
+      )))

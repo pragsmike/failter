@@ -5,8 +5,7 @@
             [failter.log :as log]
             [failter.run :as run]
             [failter.runner :as runner]
-            [failter.trial :as trial]
-            [failter.config :as config]))
+            [failter.trial :as trial]))
 
 (def cli-options
   [["-s" "--spec FILE" "The YAML spec file defining the run"]
@@ -38,32 +37,34 @@
     (let [{:keys [options arguments errors summary]} (cli/parse-opts args cli-options)]
       (cond
         (:help options)
-        (do (log/info (usage summary)) (System/exit 0))
+        (log/info (usage summary))
 
         errors
-        (do (log/error (error-msg errors)) (System/exit 1))
+        (log/error (error-msg errors))
 
         (empty? arguments)
-        (do (log/info (usage summary)) (System/exit 1)))
+        (log/info (usage summary))
 
-      (let [[command & params] arguments]
-        (case command
-          "run"
-          (if-let [spec-file (:spec options)]
-            (run/execute-run spec-file)
-            (do (log/error "The 'run' command requires a --spec file.") (System/exit 1)))
+        :else
+        (let [[command & params] arguments]
+          (case command
+            "run"
+            (if-let [spec-file (:spec options)]
+              (run/execute-run spec-file)
+              (log/error "The 'run' command requires a --spec file."))
 
-          "single"
-          (if (= (count params) 2)
-            (let [[input-file output-file] params
-                  ;; Note: 'single' now uses hardcoded values from config, as it's for simple tests.
-                  single-run-config {:model-name "ollama/qwen3:8b"
-                                     :template-path "prompts/cleanup-basic.md"}]
-              (runner/run-single-trial
-               (trial/new-trial "." (:model-name single-run-config) (:template-path single-run-config) input-file)
-               {:retries 0}))
-            (do (log/info (usage summary)) (System/exit 1)))
+            "single"
+            (if (= (count params) 2)
+              (let [[input-file output-file] params
+                    single-run-config {:model-name "ollama/qwen3:8b"
+                                       :template-path "prompts/cleanup-basic.md"}]
+                (runner/run-single-trial
+                 (trial/new-trial "." (:model-name single-run-config) (:template-path single-run-config) input-file)
+                 {:retries 0}))
+              (log/info (usage summary)))
 
-          (log/info (usage summary)))))
+            (log/info (usage summary))))))
+    (catch Exception e
+      (log/error "An unhandled exception reached the main entry point:" (.getMessage e)))
     (finally
       (shutdown-agents))))

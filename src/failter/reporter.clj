@@ -15,8 +15,9 @@
   "Transforms a single Eval record into the map structure for the final JSON report."
   [e]
   (let [t (:trial e)
-        ;; The canonical source of error information is always the trial record.
-        ;; This removes the ambiguity from the previous '(or ...)' logic.
+        ;; This is the bug fix. The canonical source of the error message must
+        ;; be the trial record itself, not a combination of the trial and eval.
+        ;; This guarantees consistent formatting.
         final-error (trial-error->str t)]
     {:prompt_id (.getName (io/file (:template-path t)))
      :score (when (nil? final-error) (:score e))
@@ -44,7 +45,7 @@
   [experiment-dir]
   (let [report-data (generate-report-data experiment-dir)
         json-string (json/write-str report-data :value-fn (fn [_ v] (if (Double/isNaN v) 0.0 v)))
-        report-json-path (exp-paths/report-json-path experiment-dir)] ;; Assumes a new path helper
+        report-json-path (exp-paths/report-json-path experiment-dir)]
 
     (log/info "--- Experiment Report (JSON) ---")
     (log/info json-string)

@@ -26,9 +26,9 @@
   2025-06-27 16:12:03.456 INFO  my.ns                    | Hello {:a 1}
   ```"
   (:require [taoensso.telemere          :as tel]
-            [taoensso.telemere.utils   :as u])
-  (:import (java.time.format DateTimeFormatter)
-           (java.time        ZoneId)))
+            [taoensso.telemere.utils   :as u]
+            [clojure.string :as str])
+  (:import (java.time        ZoneId)))
 
 
 (defn setup-logging!
@@ -94,7 +94,7 @@
 ;; -----------------------------------------------------------------------------
 ;; Facade macros (avoid reflection on varargs)
 ;; -----------------------------------------------------------------------------
-(defmacro info [& args]  `(tel/log! {:level :info, :msg ~@args}))
-(defmacro warn [& args]  `(tel/log! {:level :warn, :msg ~@args}))
-(defmacro error [& args] `(tel/log! {:level :error, :msg ~@args}))
-(defmacro debug [& args] `(tel/log! {:level :debug, :msg ~@args}))
+(defmacro info [& args]  `(tel/log! {:level :info, :msg (str/join " " (list ~@args))}))
+(defmacro warn [& args]  `(tel/log! {:level :warn, :msg (str/join " " (list ~@args))}))
+(defmacro error [& args] `(tel/log! {:level :error, :msg (str/join " " (list ~@args))}))
+(defmacro debug [& args] `(tel/log! {:level :debug, :msg (str/join " " (list ~@args))}))

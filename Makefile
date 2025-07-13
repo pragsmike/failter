@@ -9,9 +9,15 @@ test:
 	clj -X:test
 
 
+# Create a pack file to upload to AI assistant
 pack:
-	(for i in README.md USAGE.md docs/DESIGN.md deps.edn Makefile model-names.txt copilot/onboard-3.md ;\
-	   do echo $$i; cat $$i; echo ---- ; done ;\
+	(for i in README.md USAGE.md \
+				docs/DESIGN.md \
+			  deps.edn \
+				Makefile \
+				model-names.txt \
+				copilot/onboard-*.md \
+		; do echo $$i; cat $$i; echo ---- ; done ;\
   echo evaluation-prompt.md; echo -----; \
   cat prompts/evaluation-prompt.md ; \
   echo evaluation-prompt-gt.md; echo -----; \

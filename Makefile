@@ -1,9 +1,8 @@
 .PHONY: test run pack test-e2e clean-e2e
 
+# Default run target now uses the new 'run' command with a spec file.
 run:
-	clj -M:run experiment work/exp2
-	clj -M:run evaluate work/exp2
-	clj -M:run report work/exp2
+	clj -M:run run --spec work/exp2/spec.yml
 
 test:
 	clj -X:test
@@ -26,7 +25,7 @@ pack:
 	cat src/failter/*.clj ; cat test/failter/*.clj) >~/failter-pack.txt
 
 # --- End-to-End Test Target ---
-TEST_E2E_DIR := work/e2e-fm-test
+TEST_E2E_DIR := work/e2e-run-test
 # Use a fast, local model for the test
 TEST_E2E_MODEL := ollama/qwen3:1.7b
 
@@ -36,31 +35,27 @@ test-e2e:
 	rm -rf $(TEST_E2E_DIR)
 	# 1. Create test directory structure
 	@echo "--> Setting up test directory..."
-	mkdir -p $(TEST_E2E_DIR)/inputs $(TEST_E2E_DIR)/templates
+	mkdir -p $(TEST_E2E_DIR)/inputs $(TEST_E2E_DIR)/templates $(TEST_E2E_DIR)/artifacts
 	# 2. Create test files
 	echo "This is a simple test input." > $(TEST_E2E_DIR)/inputs/input1.txt
-	echo "$(TEST_E2E_MODEL)" > $(TEST_E2E_DIR)/model-names.txt
-	echo "---\nid: P999\ndescription: A test prompt with frontmatter.\n---\nThe prompt body started. The original text was: {{INPUT_TEXT}}" > $(TEST_E2E_DIR)/templates/prompt-with-fm.md
-	echo "This is a legacy prompt. The original text was: {{INPUT_TEXT}}" > $(TEST_E2E_DIR)/templates/prompt-no-fm.md
-	# 3. Run the full pipeline
-	@echo "\n--> Running experiment..."
-	clj -M:run experiment $(TEST_E2E_DIR)
-	@echo "\n--> Evaluating results..."
-	# FIX: Use the same local model as the judge to make the test self-contained
-	clj -M:run evaluate $(TEST_E2E_DIR) --judge-model $(TEST_E2E_MODEL)
-	@echo "\n--> Generating report..."
-	clj -M:run report $(TEST_E2E_DIR)
-	# 4. Display the final report for easy verification
-	@echo "\n--- Final Report ---"
-	@cat $(TEST_E2E_DIR)/report.md
+	echo "The prompt body is: {{INPUT_TEXT}}" > $(TEST_E2E_DIR)/templates/P1.md
+	# 3. Create the spec file that defines the run
+	@echo "--> Creating spec file..."
+	@echo "version: 2" > $(TEST_E2E_DIR)/spec.yml
+	@echo "inputs_dir: '$(abspath $(TEST_E2E_DIR)/inputs)'" >> $(TEST_E2E_DIR)/spec.yml
+	@echo "templates_dir: '$(abspath $(TEST_E2E_DIR)/templates)'" >> $(TEST_E2E_DIR)/spec.yml
+	@echo "artifacts_dir: '$(abspath $(TEST_E2E_DIR)/artifacts)'" >> $(TEST_E2E_DIR)/spec.yml
+	@echo "templates: ['P1.md']" >> $(TEST_E2E_DIR)/spec.yml
+	@echo "models: ['$(TEST_E2E_MODEL)']" >> $(TEST_E2E_DIR)/spec.yml
+	@echo "judge_model: '$(TEST_E2E_MODEL)'" >> $(TEST_E2E_DIR)/spec.yml
+	@echo "retries: 1" >> $(TEST_E2E_DIR)/spec.yml
+	# 4. Run the full pipeline with the single 'run' command
+	@echo "\n--> Running Failter..."
+	clj -M:run run --spec $(TEST_E2E_DIR)/spec.yml
+	# 5. Display the final report from stdout for easy verification
 	@echo "\n--- End-to-End Test Complete ---"
 	@echo "Run 'make clean-e2e' to remove the test directory."
 
 clean-e2e:
 	@echo "--- Cleaning up E2E test directory ---"
 	rm -rf $(TEST_E2E_DIR)
-
-
-
-
-

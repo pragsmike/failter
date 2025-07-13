@@ -1,6 +1,5 @@
 (ns failter.runner-test
   (:require [clojure.test :refer :all]
-            [clojure.string :as str]
             [failter.runner :as runner]
             [failter.trial :as trial]
             [failter.frontmatter :as fm]
@@ -29,45 +28,40 @@
 
 (use-fixtures :once test-file-fixture)
 
-(deftest run-single-trial-test
-  (testing "Correctly processes templates with and without frontmatter"
-    (let [template-with-fm-body "Prompt body from FM template. Input: {{INPUT_TEXT}}"
-          template-with-fm-content (str "---\nid: P123\n---\n" template-with-fm-body)
-          template-no-fm-content "Prompt body from plain template. Input: {{INPUT_TEXT}}"
-          input-content (str "---\nauthor: Tester\n---\nOriginal input body.")
-          mock-llm-response {:content "Mocked LLM response body."
-                             :usage {:total_tokens 100}
-                             :cost 0.0001}
-          ;; --- FIX: Construct full, absolute paths to all test files ---
-          temp-dir-abs-path (.getAbsolutePath (io/file temp-dir-name))
-          input-path (.getAbsolutePath (io/file temp-dir-name "inputs" "input.txt"))
-          template-fm-path (.getAbsolutePath (io/file temp-dir-name "templates" "template-with-fm.md"))
-          template-no-fm-path (.getAbsolutePath (io/file temp-dir-name "templates" "template-no-fm.md"))]
+(deftest run-single-trial-retry-logic-test
+  (let [template-content "Prompt: {{INPUT_TEXT}}"
+        input-content "Original input."
+        ;; --- Use absolute paths for robustness ---
+        artifacts-dir-abs-path (.getAbsolutePath (io/file temp-dir-name "artifacts"))
+        input-path (.getAbsolutePath (io/file temp-dir-name "inputs" "input.txt"))
+        template-path (.getAbsolutePath (io/file temp-dir-name "templates" "template.md"))
+        ;; --- Mock Responses ---
+        fail-response-1 {:error "API call timed out"}
+        success-response {:content "Mocked LLM response."
+                          :usage {:prompt_tokens 20, :completion_tokens 10}}]
 
-      (spit input-path input-content)
-      (spit template-fm-path template-with-fm-content)
-      (spit template-no-fm-path template-no-fm-content)
+    (spit input-path input-content)
+    (spit template-path template-content)
 
-      (with-redefs [failter.llm-interface/call-model
-                    (fn [_ final-prompt & _]
-                      (if (str/includes? final-prompt "FM template")
-                        (is (= "Prompt body from FM template. Input: Original input body." final-prompt))
-                        (is (= "Prompt body from plain template. Input: Original input body." final-prompt)))
-                      mock-llm-response)]
+    (testing "when trial succeeds, it writes full source provenance to the artifact"
+      (let [call-count (atom 0)
+            mock-responses [fail-response-1 success-response]
+            t (trial/new-trial artifacts-dir-abs-path "ollama/test" template-path input-path)]
+        (with-redefs [failter.llm-interface/call-model
+                      (fn [_ _ & _]
+                        (let [response (get mock-responses @call-count)]
+                          (swap! call-count inc)
+                          (assoc response :execution-time-ms 500)))]
 
-        (testing "when template has frontmatter"
-          ;; --- FIX: Use the absolute paths when creating the Trial record ---
-          (let [t (trial/new-trial temp-dir-abs-path "ollama/test" template-fm-path input-path)]
-            (runner/run-single-trial t)
-            (let [result-content (slurp (:output-path t))
-                  {:keys [frontmatter body]} (fm/parse-file-content result-content)]
-              (is (= (:content mock-llm-response) body))
-              (is (= "Tester" (:author frontmatter))))))
+          (runner/run-single-trial t {:retries 2})
 
-        (testing "when template has no frontmatter"
-          (let [t (trial/new-trial temp-dir-abs-path "ollama/test" template-no-fm-path input-path)]
-            (runner/run-single-trial t)
-            (let [result-content (slurp (:output-path t))
-                  {:keys [frontmatter body]} (fm/parse-file-content result-content)]
-              (is (= (:content mock-llm-response) body))
-              (is (= "Tester" (:author frontmatter))))))))))
+          (let [result-content (slurp (:output-path t))
+                {:keys [frontmatter body]} (fm/parse-file-content result-content)]
+
+            (is (= "Mocked LLM response." body))
+            (is (= 1 (:retry-attempts frontmatter)) "Should record 1 failed attempt")
+            ;; --- Verify source provenance is written correctly ---
+            (is (= input-path (:source-input-path frontmatter)))
+            (is (= template-path (:source-template-path frontmatter)))
+            (is (= {:prompt_tokens 20, :completion_tokens 10} (:token-usage frontmatter)))))))))
+

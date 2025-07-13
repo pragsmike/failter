@@ -5,10 +5,7 @@
   {:llm {:endpoint "http://localhost:8000/chat/completions"
          :default-timeout-ms 300000}
 
-   :single-run {:model-name "ollama/qwen3:32b"
-                :template-path "prompts/cleanup-small-model.md"}
-
-   :evaluator {:default-judge-model "openai/gpt-4o"
-               :scoring-strategy :letter-grade ;; <-- NEW: Centralized strategy selection
-               :prompts {:standard "prompts/evaluation-prompt.md"
+   ;; Internal prompt templates used by the evaluator. These are considered
+   ;; part of the application's logic, not user-configurable per-run.
+   :evaluator {:prompts {:standard "prompts/evaluation-prompt.md"
                          :ground-truth "prompts/evaluation-prompt-gt.md"}}})

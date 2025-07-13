@@ -12,8 +12,10 @@
             [failter.util :as util]))
 
 (defn- build-judge-prompt
+  "Constructs the complete prompt for the judge LLM based on the evaluation context."
   [{:keys [has-ground-truth? ground-truth-content input-content template-content output-content]}]
-  (let [strategy (get-in config/config [:evaluator :scoring-strategy])
+  (let [;; The scoring strategy is now fixed, but could be made spec-configurable in the future.
+        strategy (get-in config/config [:evaluator :scoring-strategy] :letter-grade)
         prompt-key (if has-ground-truth? :ground-truth :standard)
         prompt-path (get-in config/config [:evaluator :prompts prompt-key])
         eval-prompt-template (slurp prompt-path)
@@ -32,30 +34,34 @@
           (str/replace "{{GENERATED_OUTPUT}}" output-content)))))
 
 (defn- build-evaluation-context
-  [experiment-dir ^failter.trial.Trial trial]
+  "Builds the map of data needed for evaluation. Now relies on the Trial record
+  for source paths, making it independent of directory structure."
+  [^failter.trial.Trial trial]
   (let [output-path (:output-path trial)
         eval-file   (io/file (exp-paths/eval-path output-path))]
     (if (.exists eval-file)
       {:valid? false :reason "already evaluated"}
-      (let [input-path    (exp-paths/input-path-for-result experiment-dir output-path)
-            template-filename (:template-path trial)
-            full-template-path (.getPath (io/file (exp-paths/templates-dir experiment-dir) template-filename))
-            gt-path-str   (exp-paths/ground-truth-path-for-input experiment-dir input-path)
-            gt-file       (io/file gt-path-str)]
+      (let [;; These paths now come directly from the hydrated Trial record.
+            input-path (:source-input-path trial)
+            template-path (:source-template-path trial)
+            ;; The ground truth path is derived by assuming a parallel directory structure.
+            gt-path-str (str/replace input-path "/inputs/" "/ground_truth/")
+            gt-file (io/file gt-path-str)]
         (merge
          {:valid? true
           :trial trial
           :input-content (:body (fm/parse-file-content (slurp input-path)))
           :output-content (:body (fm/parse-file-content (slurp output-path)))
-          :template-content (:body (fm/parse-file-content (slurp full-template-path)))}
+          :template-content (:body (fm/parse-file-content (slurp template-path)))}
          (if (.exists gt-file)
            {:has-ground-truth? true
             :ground-truth-content (:body (fm/parse-file-content (slurp gt-file)))}
            {:has-ground-truth? false}))))))
 
 (defn- execute-evaluation!
+  "Calls the judge model and writes the .eval artifact."
   [judge-model context]
-  (let [strategy (get-in config/config [:evaluator :scoring-strategy])
+  (let [strategy (get-in config/config [:evaluator :scoring-strategy] :letter-grade)
         final-prompt (build-judge-prompt context)
         eval-method (if (:has-ground-truth? context) "ground-truth" "rules-based")
         trial-output-path (-> context :trial :output-path)]
@@ -66,20 +72,23 @@
         (log/error (str "Judge LLM failed for " trial-output-path "\n" err))
         (let [llm-output (:content eval-response)
               score (scoring/parse-raw-score strategy llm-output)
-              ;; --- FIX: Default to an empty string if rationale is not found ---
               rationale (or (second (re-find #"(?ms)rationale:\s*(.*)" (util/parse-yaml-block llm-output))) "")
               eval-record (feval/->Eval (:trial context) score (str/trim rationale) eval-method judge-model nil)]
           (feval/write-eval eval-record)
           (log/info (str "  Writing evaluation to: " (exp-paths/eval-path trial-output-path))))))))
 
 (defn run-evaluation
-  [experiment-dir & {:keys [judge-model] :or {judge-model (get-in config/config [:evaluator :default-judge-model])}}]
-  (log/info (str "Starting evaluation for experiment in: " experiment-dir " using judge: " judge-model))
-  (let [result-files (exp-paths/find-all-result-files experiment-dir)]
+  "Iterates through all result files in an artifacts directory and evaluates them if needed.
+  This function is now idempotent at the level of individual evaluations."
+  [artifacts-dir & {:keys [judge-model] :or {judge-model "openai/gpt-4o-mini"}}]
+  (log/info (str "Starting evaluation for artifacts in: " artifacts-dir " using judge: " judge-model))
+  (let [result-files (exp-paths/find-all-result-files artifacts-dir)]
     (doseq [file result-files]
+      ;; Create the Trial record from the on-disk artifact.
+      ;; This now includes the critical source-input-path and source-template-path.
       (let [trial (trial/from-file file)]
         (if (:error trial)
           (log/info (str "Skipping (runner failed): " (:output-path trial)))
-          (let [context (build-evaluation-context experiment-dir trial)]
+          (let [context (build-evaluation-context trial)]
             (when (:valid? context)
               (execute-evaluation! judge-model context))))))))

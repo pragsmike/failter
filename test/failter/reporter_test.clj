@@ -3,44 +3,46 @@
             [failter.reporter :as reporter]
             [failter.trial :as trial]
             [failter.eval :as feval]
-            [failter.config :as config]
-            [clojure.edn :as edn]))
+            [clojure.java.io :as io]))
 
-(defn- double-equals?
-  "Helper for robust floating point comparison."
-  [a b]
-  (< (Math/abs (- a b)) 1e-9))
+(deftest generate-report-data-test
+  (testing "Correctly transforms Eval records into the final JSON data structure"
+    (let [;; --- Test Data Setup ---
+          trial-success (trial/->Trial "model-a" "templates/P1.md" "in1.md" "out1.md"
+                                       1000 2000 0 [] 150 75 nil)
 
-(deftest calculate-summary-test
-  (testing "Calculating summary for a set of Eval records"
-    (let [;; Test data that accurately reflects a real experiment's state
-          trial-1 (trial/->Trial "model-a" "template-1.md" "in1.md" "out1.md" 1000 {} 0.001 nil)
-          eval-1  (feval/->Eval trial-1 100 "Rationale A" "ground-truth" "judge-1" nil)
+          trial-retried (trial/->Trial "model-a" "templates/P2.md" "in2.md" "out2.md"
+                                       5000 15000 2 ["Timeout" "503"] 300 150 nil)
 
-          trial-2 (trial/->Trial "model-a" "template-1.md" "in2.md" "out2.md" 2000 {} 0.002 nil)
-          eval-2  (feval/->Eval trial-2 80 "Rationale B" "ground-truth" "judge-1" nil)
+          trial-failed (trial/->Trial "model-a" "templates/P3.md" "in3.md" "out3.md"
+                                      nil nil nil nil nil nil "Final attempt failed.")
 
-          trial-3 (trial/->Trial "model-a" "template-1.md" "in3.md" "out3.md" 60000 nil nil "Read timed out")
-          eval-3  (feval/->Eval trial-3 0 "Read timed out" "failed" nil "Read timed out")
+          evals [(feval/->Eval trial-success 95 "Rationale A" "ground-truth" "judge-1" nil)
+                 (feval/->Eval trial-retried 80 "Rationale B" "rules-based" "judge-1" nil)
+                 ;; For a failed trial, score is 0 and error is populated from the trial record.
+                 (feval/->Eval trial-failed 0 "Trial failed: Final attempt failed." "failed" nil "Final attempt failed.")]]
 
-          trial-4 (trial/->Trial "model-a" "template-1.md" "in4.md" "out4.md" 500 {} nil nil)
-          eval-4  (feval/->Eval trial-4 nil nil "unevaluated" nil nil)
+      ;; Mock the function that reads from disk to isolate the transformation logic.
+      (with-redefs [failter.eval/read-all-evals (fn [_] evals)]
+        (let [report-data (reporter/generate-report-data "dummy-dir")
+              p1-data (first (filter #(= "P1.md" (:prompt_id %)) report-data))
+              p2-data (first (filter #(= "P2.md" (:prompt_id %)) report-data))
+              p3-data (first (filter #(= "P3.md" (:prompt_id %)) report-data))]
 
-          trial-5 (trial/->Trial "model-a" "template-1.md" "in5.md" "out5.md" 1500 {} 0.0015 nil)
-          eval-5  (feval/->Eval trial-5 60 "Rationale C" "rules-based" "judge-1" nil)
+          ;; --- Assertions for Successful Trial (P1) ---
+          (is (= 95 (:score p1-data)))
+          (is (= {:model_used "model-a" :tokens_in 150 :tokens_out 75} (:usage p1-data)))
+          (is (= {:execution_time_ms 1000 :total_trial_time_ms 2000 :retry_attempts 0} (:performance p1-data)))
+          (is (nil? (:error p1-data)))
 
-          evals [eval-1 eval-2 eval-3 eval-4 eval-5]]
+          ;; --- Assertions for Retried Trial (P2) ---
+          (is (= 80 (:score p2-data)))
+          (is (= {:model_used "model-a" :tokens_in 300 :tokens_out 150} (:usage p2-data)))
+          (is (= {:execution_time_ms 5000 :total_trial_time_ms 15000 :retry_attempts 2} (:performance p2-data)))
+          (is (nil? (:error p2-data)))
 
-      (with-redefs [config/config (assoc-in config/config [:evaluator :scoring-strategy] :letter-grade)]
-        (let [summary (reporter/calculate-summary evals)
-              ;; Parse the result string back into a map for robust comparison
-              actual-dist-map (edn/read-string (:score-dist summary))]
-
-          (is (= 5 (:trials summary)))
-          (is (= 1 (:errors summary)))
-          ;; Scores being averaged: [100, 80, 0, 60]. Avg = 240 / 4 = 60.0
-          (is (= 60.0 (:avg-score summary)))
-
-          ;; --- FIX: The assertion now correctly checks the map produced by the fixed scoring code ---
-          ;; The expected distribution from scores (100, 80, 0, 60) is one of each grade.
-          (is (= {"A" 1, "B" 1, "C" 1, "F*" 1} actual-dist-map)))))))
+          ;; --- Assertions for Failed Trial (P3) ---
+          (is (nil? (:score p3-data)))
+          (is (= {:model_used "model-a" :tokens_in nil :tokens_out nil} (:usage p3-data)))
+          (is (some? (:error p3-data)))
+          (is (= "Trial failed: Final attempt failed." (:error p3-data))))))))

@@ -1,32 +1,34 @@
 # **Failter: LLM-Powered Text Filtering and Experimentation**
 
-Failter is a command-line framework for systematically filtering text using Large Language Models (LLMs). It serves as a powerful experimentation harness to compare the performance of different models and prompt engineering strategies for specific text transformation tasks.
+Failter is a command-line framework for systematically testing text transformation and filtering tasks using Large Language Models (LLMs). It serves as a powerful, idempotent experimentation harness to compare the performance of different models and prompt engineering strategies.
 
-Instead of hard-coding filtering logic, Failter defines transformations in natural language via **prompt templates**. These templates can themselves be self-documenting artifacts with their own metadata. Failter then automates the process of running these transformations across various models and input files, evaluating the results with a "judge" LLM, and generating comparative reports.
+Instead of hard-coding filtering logic, Failter defines transformations in natural language via **prompt templates**. The entire experiment—including inputs, templates, models, and run configuration—is defined in a single **YAML specification file**. Failter handles the orchestration, execution, and reporting in a single, atomic command.
 
-See the [USAGE.md](USAGE.md) document for a detailed user guide.
+See the [USAGE.md](USAGE.md) document for a detailed user guide and the [spec format reference](./docs/spec-format.md).
 
 See the [DESIGN.md](./docs/DESIGN.md) document for a more detailed architectural overview.
 
 ## Features
 
+-   **Declarative Experiments:** Define your entire testing matrix (inputs, prompts, models) in a single, version-controllable YAML file.
 -   **Prompt-Driven Logic:** Define complex text transformations in natural language, not code.
--   **Self-Documenting Prompts:** Template files can contain their own YAML frontmatter for metadata, which is seamlessly ignored at runtime.
--   **Systematic Experimentation:** Run trials across all combinations of inputs, prompts, and models automatically.
+-   **Systematic & Idempotent:** A single `run` command orchestrates all trials, automatically skipping completed work and allowing you to safely resume failed runs.
 -   **Automated Evaluation:** Use a powerful "judge" LLM (e.g., GPT-4o) to score the quality of each trial's output.
--   **Flexible Scoring:** The evaluation system is pluggable. Define custom scoring strategies (e.g., letter grades, 0-100 numeric scores) that can be changed without altering core logic.
--   **Comprehensive Reporting:** Generate summary reports that rank model-prompt combinations by average score, time, and cost, saved as both Markdown and CSV.
--   **Resilient & Idempotent:** Automatically skips completed work and isolates failures, allowing you to resume long-running experiments.
--   **Data-Rich Artifacts:** Output files are self-contained with YAML frontmatter detailing how they were created, including performance metrics and any errors.
+-   **Transparent Retries:** Automatically retries failed LLM calls due to transient errors, while recording the attempts as valuable reliability data.
+-   **Structured JSON Output:** The primary output is a stream of clean JSON sent to `stdout`, perfect for programmatic integration with other tools.
+-   **Rich, Portable Artifacts:** All intermediate results are stored in a self-contained `artifacts_dir`, making runs portable and fully auditable. Output files contain rich YAML frontmatter detailing how they were created.
 -   **Insightful Diagnostics:** Captures the model's "internal monologue" (`<think>...</think>`) into separate `.thoughts` files for deeper analysis.
 
 ## Workflow
 
-The Failter workflow is a three-step pipeline executed from the command line:
+The Failter workflow is now a single, idempotent pipeline executed from the command line.
 
-1.  **`experiment`**: Kicks off the process. Failter reads your experiment configuration, runs each trial (input + prompt + model), and generates filtered output files in a structured `results/` directory.
-2.  **`evaluate`**: Assesses the quality of the generated outputs. It uses a powerful "judge" LLM to compare the original text with the filtered output based on the prompt's instructions, saving a score and rationale for each.
-3.  **`report`**: Synthesizes the results. It scans all trial outputs and their evaluations, automatically assigning a score of 0 to any failed trials, and generates a summary report as both `report.md` and `report.csv`.
+1.  **Define a `spec.yml` file:** You create a YAML file that specifies the paths to your inputs and templates, the models to test, the judge model, and an `artifacts_dir` for storing results.
+2.  **Execute `failter run`:** You run a single command that points to your spec file. Failter handles the rest:
+    *   It reads the spec and determines the full set of trials to run.
+    *   It executes only the trials that do not already have a corresponding result in the `artifacts_dir`.
+    *   It runs the judge LLM to evaluate any newly generated results.
+    *   It prints a final JSON report to `stdout` summarizing the performance of all prompt-model combinations.
 
 ## Installation & Setup
 
@@ -52,58 +54,60 @@ The Failter workflow is a three-step pipeline executed from the command line:
 
 For a detailed walkthrough, see the [USAGE.md](USAGE.md) guide.
 
-### 1. Defining an Experiment
+### 1. Defining an Experiment Spec
 
-Create an experiment directory with `inputs/`, `templates/`, and a `model-names.txt` file.
+Create a `spec.yml` file to define your run.
+
+```yaml
+# my-experiment/spec.yml
+version: 2
+inputs_dir: /path/to/my/inputs
+templates_dir: /path/to/my/templates
+artifacts_dir: ./my-experiment/artifacts # Failter will store all results here
+
+templates: [cleanup-aggressive.md, cleanup-basic.md]
+models: ["openai/gpt-4o-mini", "ollama/qwen3:8b"]
+judge_model: "openai/gpt-4o"
+retries: 2 # Optional: Attempt each LLM call up to 3 times
+```
 
 ### 2. Running the Pipeline
 
-All commands are run from the project root.
+All that's needed is a single command run from the project root.
 
-**Step 1: Run the Experiment**```bash
-# Perform a dry run first to verify the setup
-clj -M:run experiment my-experiment --dry-run
-
-# Execute the live run
-clj -M:run experiment my-experiment
-```
-
-**Step 2: Evaluate the Results**
 ```bash
-clj -M:run evaluate my-experiment
-```
-
-**Step 3: Generate the Report**
-```bash
-clj -M:run report my-experiment
+clj -M:run run --spec my-experiment/spec.yml
 ```
 
 ### 3. Interpreting the Results
 
-After running the full pipeline, your experiment directory will contain the generated `results/` directory and the final reports.
+The command will print a JSON array to `stdout`. Each object in the array represents the aggregated results for a specific prompt.
 
-**Example Report Output (`report.md`):**
-(This example uses the default `:letter-grade` scoring strategy)
-
+**Example JSON Output:**
+```json
+[
+  {
+    "prompt_id": "cleanup-aggressive.md",
+    "score": 90,
+    "usage": {
+      "model_used": "openai/gpt-4o-mini",
+      "tokens_in": 1834,
+      "tokens_out": 1790
+    },
+    "performance": {
+      "execution_time_ms": 8120,
+      "total_trial_time_ms": 8120,
+      "retry_attempts": 0
+    },
+    "error": null
+  },
+  {
+    "prompt_id": "cleanup-basic.md",
+    "score": null,
+    "usage": { ... },
+    "performance": { ... },
+    "error": "Trial failed: Final attempt failed: API call timed out"
+  }
+]
 ```
-Model                               | Template             | Avg Score  | Avg Time(s) | Avg Cost   | Trials  | Errors | Eval Methods       | Score Distribution
------------------------------------------------------------------------------------------------------------------------------------------------------------
-openai/gpt-4o-mini                  | cleanup-aggressive.md| 90.00      | 8.12        | $0.000152  | 2       | 0      | 2 rules-based      | {"A" 1, "B" 1}
-ollama/qwen3:8b                     | cleanup-aggressive.md| 84.00      | 35.80       | $0.000000  | 2       | 0      | 2 rules-based      | {"A" 1, "B" 1}
-ollama/qwen3:8b                     | cleanup-basic.md     | 50.00      | 42.88       | $0.000000  | 2       | 0      | 2 rules-based      | {"B" 1, "D" 1}
-openai/gpt-4o-mini                  | cleanup-basic.md     | 20.00      | 60.01       | $0.000000  | 2       | 2      | 2 rules-based      | {"F*" 2}
-```
-
--   **Avg Score:** The primary quality metric, normalized to a **0-100** scale. Higher is better.
--   **Score Distribution:** Shows the consistency of the results. Its format depends on the active scoring strategy (e.g., letter grades, numeric buckets). A tight grouping of high scores is better than a wide spread.
--   For detailed analysis, inspect the individual `.eval` and `.thoughts` files in the `results/` subdirectories.
-
-## How It Works
-
-Failter's architecture is built on a few key design principles:
-
--   **Filesystem as Database:** The entire state of an experiment is stored in its directory, making it portable and easy to version control.
--   **Decoupled Logic:** The code is organized into modular namespaces. The "policy" of how to score an evaluation is defined in the `failter.scoring` namespace, decoupled from the "mechanism" of running the evaluation in `failter.evaluator`. This makes the system easy to understand and extend.
--   **Self-Describing Artifacts:** Each output file's YAML frontmatter contains a complete record of its creation, including the model, template, execution time, token usage, and cost. The framework's file parsers intelligently distinguish between ignorable metadata and executable content in all relevant files.
-
-See the [DESIGN.md](./docs/DESIGN.md) document for a more detailed architectural overview.
+For deeper analysis, you can inspect the individual output files, `.eval`, and `.thoughts` files inside the specified `artifacts_dir`.

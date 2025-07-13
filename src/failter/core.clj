@@ -1,30 +1,26 @@
 (ns failter.core
   (:require [clojure.tools.cli :as cli]
             [clojure.string :as str]
-            [failter.config :as config]
-            [failter.evaluator :as evaluator]
-            [failter.experiment :as experiment]
             [failter.llm-interface :as llm]
             [failter.log :as log]
-            [failter.reporter :as reporter]
+            [failter.run :as run]
             [failter.runner :as runner]
-            [failter.trial :as trial]))
+            [failter.trial :as trial]
+            [failter.config :as config]))
 
 (def cli-options
-  [["-j" "--judge-model MODEL" "Specify the judge model to use for evaluation"
-    :default nil]
-   ["-d" "--dry-run" "For 'experiment', print trial details without executing"]
+  [["-s" "--spec FILE" "The YAML spec file defining the run"]
    ["-h" "--help" "Print this help message"]])
 
 (defn- usage [options-summary]
   (->> ["Failter: An LLM-Powered Text Filtering and Experimentation Framework"
         ""
-        "Usage: failter <command> <dir> [options]"
+        "Usage: failter <command> [options]"
         ""
-        "Commands:"
-        "  experiment <dir>  Run a full experiment from a structured directory."
-        "  evaluate <dir>    Evaluate results in an experiment directory."
-        "  report <dir>      Generate a summary report for an experiment."
+        "Primary Command:"
+        "  run --spec <file>  Executes a full, idempotent run defined by a spec file."
+        ""
+        "Other Commands:"
         "  single <in> <out> Run a single, hardcoded transformation (for testing)."
         ""
         "Options:"
@@ -37,49 +33,35 @@
 
 (defn -main [& args]
   (try
-    (log/setup-logging!) ; <-- Configure logging first
+    (log/setup-logging!)
     (llm/pre-flight-checks)
     (let [{:keys [options arguments errors summary]} (cli/parse-opts args cli-options)]
       (cond
         (:help options)
         (do (log/info (usage summary)) (System/exit 0))
+
         errors
         (do (log/error (error-msg errors)) (System/exit 1))
-        (< (count arguments) 1)
+
+        (empty? arguments)
         (do (log/info (usage summary)) (System/exit 1)))
 
       (let [[command & params] arguments]
         (case command
-          "experiment"
-          (if-let [experiment-dir (first params)]
-            (let [trial-fn (if (:dry-run options)
-                             experiment/print-trial-details
-                             runner/live-trial-runner)]
-              (log/info (str "--- Starting Experiment (" (if (:dry-run options) "Dry" "Live") " Run) ---"))
-              (experiment/conduct-experiment experiment-dir trial-fn))
-            (do (log/info (usage summary)) (System/exit 1)))
-
-          "evaluate"
-          (if-let [experiment-dir (first params)]
-            (if-let [judge-model (:judge-model options)]
-              (evaluator/run-evaluation experiment-dir :judge-model judge-model)
-              (evaluator/run-evaluation experiment-dir))
-            (do (log/info (usage summary)) (System/exit 1)))
-
-          "report"
-          (if-let [experiment-dir (first params)]
-            (reporter/generate-report experiment-dir)
-            (do (log/info (usage summary)) (System/exit 1)))
+          "run"
+          (if-let [spec-file (:spec options)]
+            (run/execute-run spec-file)
+            (do (log/error "The 'run' command requires a --spec file.") (System/exit 1)))
 
           "single"
           (if (= (count params) 2)
             (let [[input-file output-file] params
-                  single-run-config (:single-run config/config)]
+                  ;; Note: 'single' now uses hardcoded values from config, as it's for simple tests.
+                  single-run-config {:model-name "ollama/qwen3:8b"
+                                     :template-path "prompts/cleanup-basic.md"}]
               (runner/run-single-trial
-               (trial/->Trial (:model-name single-run-config)
-                              (:template-path single-run-config)
-                              input-file
-                              output-file)))
+               (trial/new-trial "." (:model-name single-run-config) (:template-path single-run-config) input-file)
+               {:retries 0}))
             (do (log/info (usage summary)) (System/exit 1)))
 
           (log/info (usage summary)))))

@@ -3,68 +3,70 @@
             [failter.evaluator :as evaluator]
             [failter.trial :as trial]
             [failter.frontmatter :as fm]
-            [clojure.java.io :as io]))
+            [clojure.java.io :as io]
+            [clojure.string :as str]))
 
-(def ^:private temp-dir-name "temp-evaluator-test-exp")
+(def ^:private test-root-dir "temp-evaluator-test")
+(def ^:private inputs-dir (io/file test-root-dir "source" "inputs"))
+(def ^:private templates-dir (io/file test-root-dir "source" "templates"))
+(def ^:private gt-dir (io/file test-root-dir "source" "ground_truth"))
+(def ^:private artifacts-dir (io/file test-root-dir "artifacts"))
 
-(defn- create-test-files! []
-  (let [base-dir (io/file temp-dir-name)]
-    (.mkdirs (io/file base-dir "inputs"))
-    (.mkdirs (io/file base-dir "templates"))
-    (.mkdirs (io/file base-dir "results" "test-model_template-with-fm"))
-    (.mkdirs (io/file base-dir "results" "test-model_template-no-fm")))
+(defn- setup-test-environment! []
+  (.mkdirs inputs-dir)
+  (.mkdirs templates-dir)
+  (.mkdirs gt-dir)
+  (.mkdirs (io/file artifacts-dir "model_template")))
 
-  (spit (io/file temp-dir-name "inputs" "input.txt") "Original input text.")
+(defn- cleanup-test-environment! []
+  (when (.exists (io/file test-root-dir))
+    (doseq [f (reverse (file-seq (io/file test-root-dir)))]
+      (io/delete-file f))))
 
-  (let [output-metadata {:filtered-by-model "test-model" :filtered-by-template "template-with-fm.md"}
-        output-body "Generated body text."]
-    (spit (io/file temp-dir-name "results" "test-model_template-with-fm" "input.txt")
-          (fm/serialize output-metadata output-body)))
-
-  (let [output-metadata {:filtered-by-model "test-model" :filtered-by-template "template-no-fm.md"}
-        output-body "Generated body text."]
-    (spit (io/file temp-dir-name "results" "test-model_template-no-fm" "input.txt")
-          (fm/serialize output-metadata output-body))))
-
-
-(defn- delete-recursively [file]
-  (when (.isDirectory file)
-    (doseq [f (.listFiles file)]
-      (delete-recursively f)))
-  (io/delete-file file))
-
-(defn- test-file-fixture [f]
+(defn- test-fixture [f]
   (try
-    (create-test-files!)
+    (cleanup-test-environment!)
+    (setup-test-environment!)
     (f)
     (finally
-      (delete-recursively (io/file temp-dir-name)))))
+      (cleanup-test-environment!))))
 
-(use-fixtures :once test-file-fixture)
+(use-fixtures :each test-fixture)
 
 (deftest build-evaluation-context-test
-  (testing "Correctly extracts template body from template file"
-    (let [template-with-fm-body "This is the REAL prompt. {{INPUT_TEXT}}"
-          template-with-fm-content (str "---\nid: P456\n---\n" template-with-fm-body)
-          template-no-fm-content "This is a plain old template. {{INPUT_TEXT}}"]
+  (testing "Correctly builds context using source paths from the trial record"
+    (let [;; --- Define source files and their content ---
+          input-path (.getAbsolutePath (io/file inputs-dir "input.txt"))
+          template-path (.getAbsolutePath (io/file templates-dir "template.md"))
+          gt-path (.getAbsolutePath (io/file gt-dir "input.txt"))
+          input-content "The original input body."
+          template-body "The real prompt body."
+          template-with-fm (str "---\nid: P1\n---\n" template-body)
+          gt-content "The perfect output."
+          output-body "The model-generated output."
+          ;; --- Create the artifact file that the runner would produce ---
+          artifact-path (.getAbsolutePath (io/file artifacts-dir "model_template" "input.txt"))
+          artifact-metadata {:filtered-by-model "ollama/test"
+                             :filtered-by-template "template.md"
+                             :source-input-path input-path     ;; Critical piece of data
+                             :source-template-path template-path ;; Critical piece of data
+                             }
+          artifact-content (fm/serialize artifact-metadata output-body)]
 
-      ;; Create the test templates on the fly
-      (spit (io/file temp-dir-name "templates" "template-with-fm.md") template-with-fm-content)
-      (spit (io/file temp-dir-name "templates" "template-no-fm.md") template-no-fm-content)
+      (spit input-path input-content)
+      (spit template-path template-with-fm)
+      (spit gt-path gt-content)
+      (spit artifact-path artifact-content)
 
-      (testing "when template has frontmatter"
-        (let [result-file (io/file temp-dir-name "results" "test-model_template-with-fm" "input.txt")
-              trial-fm (trial/from-file result-file)
-              ;; Accessing the private function for focused unit testing
-              build-fn #'evaluator/build-evaluation-context
-              context (build-fn temp-dir-name trial-fm)]
-          (is (= template-with-fm-body (:template-content context))
-              "Should only use the body of the template, ignoring its frontmatter.")))
+      ;; Now, read the trial record from the artifact file
+      (let [t (trial/from-file (io/file artifact-path))
+            ;; Access the private function for focused unit testing
+            build-fn #'evaluator/build-evaluation-context
+            context (build-fn t)]
 
-      (testing "when template has no frontmatter"
-        (let [result-file (io/file temp-dir-name "results" "test-model_template-no-fm" "input.txt")
-              trial-no-fm (trial/from-file result-file)
-              build-fn #'evaluator/build-evaluation-context
-              context (build-fn temp-dir-name trial-no-fm)]
-          (is (= template-no-fm-content (:template-content context))
-              "Should use the entire file content when no frontmatter is present."))))))
+        (is (:valid? context))
+        (is (= input-content (:input-content context)) "Should read the body of the original input file.")
+        (is (= output-body (:output-content context)) "Should read the body of the artifact file.")
+        (is (= template-body (:template-content context)) "Should use only the body of the template, ignoring its frontmatter.")
+        (is (= true (:has-ground-truth? context)) "Should find the ground truth file.")
+        (is (= gt-content (:ground-truth-content context)) "Should correctly read the ground truth content.")))))

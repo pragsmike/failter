@@ -1,5 +1,6 @@
 (ns failter.frontmatter-test
   (:require [clojure.test :refer :all]
+            [clojure.string :as str]
             [failter.frontmatter :as fm]))
 
 (deftest parse-file-content-test

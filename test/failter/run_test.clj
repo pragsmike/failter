@@ -1,7 +1,11 @@
 (ns failter.run-test
   (:require [clojure.test :refer :all]
+            [clojure.string]
+            [failter.exp-paths]
+            [failter.evaluator]
             [failter.run :as run]
             [failter.frontmatter :as fm]
+            [failter.runner]
             [clojure.java.io :as io]))
 
 (def ^:private test-root-dir "temp-run-test-dir")
@@ -47,14 +51,17 @@
     (let [runner-call-count (atom 0)
           evaluator-call-count (atom 0)]
 
-      (with-redefs [;; Mock the runner to just create a dummy artifact file
+      (with-redefs [;; Mock the runner to create a dummy artifact file.
+                    ;; FIX: The mock must create parent directories, just like the real one.
                     failter.runner/run-single-trial
                     (fn [trial _]
                       (swap! runner-call-count inc)
-                      (let [metadata {:filtered-by-model (:model-name trial)
+                      (let [output-path (:output-path trial)
+                            metadata {:filtered-by-model (:model-name trial)
                                       :filtered-by-template (.getName (io/file (:template-path trial)))
                                       :token-usage {:prompt_tokens 10 :completion_tokens 5}}]
-                        (spit (:output-path trial) (fm/serialize metadata "body"))))
+                        (io/make-parents output-path) ;; <-- This was the missing step.
+                        (spit output-path (fm/serialize metadata "body"))))
 
                     ;; Mock the evaluator to create a dummy .eval file
                     failter.evaluator/run-evaluation
@@ -80,5 +87,6 @@
 
 (deftest load-spec-validation-test
   (testing "Spec loading throws an error if a required key is missing"
-    (spit spec-file "models: [a,b,c]")
-    (is (thrown? IllegalArgumentException (run/execute-run (.getPath spec-file))))))
+    (let [bad-spec-file (io/file test-root-dir "bad-spec.yml")]
+      (spit bad-spec-file "models: [a,b,c]")
+      (is (thrown? IllegalArgumentException (run/execute-run (.getPath bad-spec-file)))))))

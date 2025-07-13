@@ -5,7 +5,9 @@
             [failter.log :as log]
             [clojure.java.io :as io]))
 
-(defn- trial-error->str [trial]
+(defn- trial-error->str
+  "Creates a canonical error string from a trial's error field."
+  [trial]
   (when-let [err (:error trial)]
     (str "Trial failed: " err)))
 
@@ -13,7 +15,9 @@
   "Transforms a single Eval record into the map structure for the final JSON report."
   [e]
   (let [t (:trial e)
-        final-error (or (:error e) (trial-error->str t))]
+        ;; The canonical source of error information is always the trial record.
+        ;; This removes the ambiguity from the previous '(or ...)' logic.
+        final-error (trial-error->str t)]
     {:prompt_id (.getName (io/file (:template-path t)))
      :score (when (nil? final-error) (:score e))
      :usage {:model_used (:model-name t)

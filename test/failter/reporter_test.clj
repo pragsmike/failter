@@ -2,19 +2,22 @@
   (:require [clojure.test :refer :all]
             [failter.reporter :as reporter]
             [failter.trial :as trial]
-            [failter.eval :as feval]
-            [clojure.java.io :as io]))
+            [failter.eval :as feval]))
 
 (deftest generate-report-data-test
   (testing "Correctly transforms Eval records into the final JSON data structure"
     (let [;; --- Test Data Setup ---
+          ;; These records now include the source-template-path and source-input-path fields.
           trial-success (trial/->Trial "model-a" "templates/P1.md" "in1.md" "out1.md"
+                                       "templates/P1.md" "in1.md" ;; Correct arity
                                        1000 2000 0 [] 150 75 nil)
 
           trial-retried (trial/->Trial "model-a" "templates/P2.md" "in2.md" "out2.md"
+                                       "templates/P2.md" "in2.md" ;; Correct arity
                                        5000 15000 2 ["Timeout" "503"] 300 150 nil)
 
           trial-failed (trial/->Trial "model-a" "templates/P3.md" "in3.md" "out3.md"
+                                      "templates/P3.md" "in3.md" ;; Correct arity
                                       nil nil nil nil nil nil "Final attempt failed.")
 
           evals [(feval/->Eval trial-success 95 "Rationale A" "ground-truth" "judge-1" nil)

@@ -4,7 +4,6 @@
             [clojure.data.json :as json]
             [failter.log :as log]
             [failter.util :as util]
-            [failter.exp-paths :as exp-paths]
             [failter.trial :as trial]
             [failter.runner :as runner]
             [failter.evaluator :as evaluator]
@@ -21,11 +20,15 @@
 
 (defn- load-spec [spec-path]
   (log/info (str "Loading spec file from: " spec-path))
-  (-> (slurp spec-path)
-      (yaml/parse-string :keywords true)
-      (validate-spec)))
+  (let [spec (-> (slurp spec-path)
+                 (yaml/parse-string :keywords true))]
+    (validate-spec
+     ;; Defensively parse numeric keys right after loading to ensure correct types.
+     (cond-> spec
+       (:retries spec) (update :retries #(Integer/parseInt (str %)))))))
 
 (defn- run-trials! [spec trials]
+  ;; The :retries value is now guaranteed to be a number if it exists.
   (let [runner-opts {:retries (get spec :retries 0)}]
     (doseq [t trials]
       (let [output-file (io/file (:output-path t))]
@@ -42,7 +45,6 @@
   (log/info "--- Starting Evaluation Phase ---")
   (let [judge-model (:judge_model spec)
         artifacts-dir (:artifacts_dir spec)]
-    ;; The evaluator is already idempotent; it skips existing .eval files.
     (evaluator/run-evaluation artifacts-dir :judge-model judge-model)))
 
 (defn- generate-and-output-report [spec]
@@ -52,10 +54,8 @@
         json-string (json/write-str report-data :value-fn (fn [_ v] (if (Double/isNaN v) 0.0 v)))]
 
     (log/info "--- Final Report (JSON) ---")
-    ;; Direct machine-readable data to stdout
     (println json-string)
 
-    ;; Optionally write to a file for archival
     (when-let [output-file (:output_file spec)]
       (log/info (str "Writing JSON report to file: " output-file))
       (spit output-file json-string))
@@ -69,7 +69,6 @@
     (let [spec (load-spec spec-path)
           artifacts-dir (:artifacts_dir spec)
           inputs (util/list-file-paths (io/file (:inputs_dir spec)))
-          ;; Use the explicit list of templates from the spec
           templates (map #(.getPath (io/file (:templates_dir spec) %)) (:templates spec))
           models (:models spec)]
 
@@ -77,19 +76,16 @@
       (log/info (str "Inputs: " (count inputs) " | Templates: " (count templates) " | Models: " (count models)))
       (log/info (str "Artifacts will be stored in: " artifacts-dir))
 
-      ;; 1. Experiment Phase (Idempotent)
       (let [all-trials (for [in inputs
                              tpl templates
                              mdl models]
                          (trial/new-trial artifacts-dir mdl tpl in))]
         (run-trials! spec all-trials))
 
-      ;; 2. Evaluation Phase (Idempotent)
       (run-evaluations! spec)
 
-      ;; 3. Reporting Phase (Always runs)
       (generate-and-output-report spec))
 
     (catch Exception e
-      (log/error "The run failed with an unrecoverable error:" (.getMessage e))
+      (log/error (str "The run failed with an unrecoverable error:" (.getMessage e)))
       (System/exit 1))))
